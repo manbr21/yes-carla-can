@@ -90,12 +90,12 @@ def game_loop(args):
             )
 
         display = pygame.display.set_mode(
-            (width / 2, height / 2), pygame.HWSURFACE | pygame.DOUBLEBUF
+            (args.width, args.height), pygame.HWSURFACE | pygame.DOUBLEBUF
         )
         display.fill((0, 0, 0))
         pygame.display.flip()
 
-        hud = HUD(width / 2, height / 2)
+        hud = HUD(args.width, args.height)
         world = World(sim_world, hud, args, can_bus)
         controller = KeyboardControl(world, args.autopilot)
 

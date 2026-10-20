@@ -19,7 +19,7 @@ What this script does:
   2. Creates the virtual CAN bus (${VCAN_INTERFACE:-vcan0}) using the Linux kernel vcan module
   3. Creates a second virtual CAN bus (vcan1) for the attacker and bridges them via can-gw
      so that candump labels attacker frames as 'R' and normal frames as 'T'
-  4. Waits 5 seconds for CARLA to initialise
+  4. Waits 10 seconds for CARLA to initialise
   5. Starts the CARLA client module (spawns the vehicle and sensors)
   6. Starts the vehicle controls module (translates vehicle state into CAN frames)
 
@@ -75,21 +75,10 @@ echo "Using Python binary: ${PYTHON_EXEC}"
 # On hybrid Intel/NVIDIA systems, Vulkan may default to the Intel GPU and cause
 # crashes. Force the NVIDIA ICD if available; otherwise fall back to the default.
 # Skip auto-detection if the user already set VK_ICD_FILENAMES explicitly.
-if [[ -n "${VK_ICD_FILENAMES}" ]]; then
-    echo "VK_ICD_FILENAMES already set to '${VK_ICD_FILENAMES}'. Skipping auto-detection."
-else
-    NVIDIA_ICD=$(find /usr/share/vulkan/icd.d /etc/vulkan/icd.d 2>/dev/null -name "nvidia_icd*.json" | head -1)
-    if [[ -n "${NVIDIA_ICD}" ]]; then
-        echo "NVIDIA Vulkan ICD detected (${NVIDIA_ICD}). Forcing VK_ICD_FILENAMES to use NVIDIA GPU."
-        export VK_ICD_FILENAMES="${NVIDIA_ICD}"
-    else
-        echo "No NVIDIA Vulkan ICD found. Using system default GPU."
-    fi
-fi
 
 # Start CARLA simulator in the background
 echo "Starting CARLA simulator..."
-./${CARLA_FOLDER_NAME}/CarlaUE4.sh -RenderOffScreen -quality-level=Low -nosound 2>/dev/null &
+./${CARLA_FOLDER_NAME}/CarlaUE4.sh -quality-level=Low -nosound -windowed -ResX=800 -ResY=600 &
 
 echo "Setting up AVTP virtual network..."
 sudo bash "${AVTP_DIR}/setup.sh" --capture
@@ -99,8 +88,6 @@ echo "Exposing AVTP sender interface to Host..."
 sudo ip netns exec sender ip link set veth-s netns 1
 sleep 1
 sudo ip link set dev veth-s up 
-
-
 
 # Set up virtual CAN bus
 echo "Setting up virtual CAN bus..."
@@ -122,7 +109,7 @@ sudo cangw -A -s "${VCAN_INTERFACE}" -d vcan1 -e 2>/dev/null || true
 
 # Give CARLA a moment to initialise before connecting clients
 echo "Waiting for CARLA to start..."
-sleep 5
+sleep 10
 
 # Executa os módulos Python no Host com privilégios para o Scapy
 echo "Starting CARLA client module..."

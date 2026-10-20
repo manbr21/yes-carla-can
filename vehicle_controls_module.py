@@ -223,8 +223,8 @@ def keyboard_parser_loop(dbc_path="data/carla.dbc", vcan_channel=None):
     height = root.winfo_screenheight()
     root.destroy()
     print(f"width: {width}, height: {height}")
-    WIDTH = int(width * 0.45)
-    HEIGHT = int(height * 0.33)
+    WIDTH = 1280
+    HEIGHT = 250
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
     # Interface related
