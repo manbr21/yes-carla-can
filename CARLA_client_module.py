@@ -70,6 +70,9 @@ def game_loop(args):
         world_settings.no_rendering_mode = False
         # fps = 30
         # world_settings.fixed_delta_seconds = round(1/fps, 2) # Set FPS
+        if args.lane_keeping != "off" and not args.sync:
+            # Fixed physics step: on a slow machine a variable step (~0.25 s) makes the controller unstable.
+            world_settings.fixed_delta_seconds = 0.05
         sim_world.apply_settings(world_settings)
 
         if args.sync:
@@ -242,6 +245,8 @@ def main():
     )
     argparser.add_argument("--lk-gains", type=float, nargs=2, default=[0.5, 0.05], metavar=("KP", "KD"),
                            help="Lane keeping PD gains (default: 0.5 0.05).")
+    argparser.add_argument("--lk-bias", type=float, default=0.0, metavar="E",
+                           help="Perceived-error offset measured once WITHOUT attack (camera calibration), subtracted by the controller.")
     argparser.add_argument("--target-speed", type=float, default=30.0, metavar="KMH", help="Lane keeping target speed (default: 30).")
     argparser.add_argument("--run-seconds", type=float, default=0.0, metavar="S",
                            help="Stop the lane keeping run after S seconds of driving (0 = never).")

@@ -11,6 +11,7 @@ LANE_KEEPING="${LANE_KEEPING:-off}"
 SPAWN_INDEX="${SPAWN_INDEX:-}"
 RUN_SECONDS="${RUN_SECONDS:-0}"
 LOG_CSV="${LOG_CSV:-}"
+LK_BIAS="${LK_BIAS:-}"     # e.g. LK_BIAS=0.12 (error measured on the benign run)
 LK_GAINS="${LK_GAINS:-}"   # e.g. LK_GAINS="0.4 0.05" (lane keeping KP KD)
 AVTP_DIR="${SCRIPT_DIR}/avtp_network"
 
@@ -142,6 +143,7 @@ fi
 CLIENT_ARGS+=(--lane-keeping "${LANE_KEEPING}" --psa-yaw "${PSA_YAW}" --run-seconds "${RUN_SECONDS}")
 [[ -n "${SPAWN_INDEX}" ]] && CLIENT_ARGS+=(--spawn-index "${SPAWN_INDEX}")
 [[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
+[[ -n "${LK_BIAS}" ]] && CLIENT_ARGS+=(--lk-bias "${LK_BIAS}")
 [[ -n "${LK_GAINS}" ]] && CLIENT_ARGS+=(--lk-gains ${LK_GAINS})
 
 # Executar os módulos Python no Host com sudo -E (Acesso a vcan0 + veth-s Socket RAW + localhost)

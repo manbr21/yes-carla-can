@@ -63,7 +63,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -72,6 +72,7 @@ class LaneKeepingNode(object):
         self._target_speed = target_speed_kmh / 3.6
         self._run_seconds = run_seconds
         self._kp, self._kd, self._max_steer = kp, kd, max_steer
+        self._bias = bias                # calibration: error measured on the benign run at the start
 
         world = parent_actor.get_world()
         self._map = world.get_map()
@@ -139,6 +140,8 @@ class LaneKeepingNode(object):
         error, self._lane_width_px = lane_center_error(tags, self._lane_width_px)
         if error is None:                      # no marking visible: keep the last estimate
             error = self._last_error
+        else:
+            error -= self._bias
         if self._last_t is None:               # first frame: no derivative yet (avoids a kick at the start)
             self._last_error = error
         dt = (t - self._last_t) if self._last_t is not None else 0.05
