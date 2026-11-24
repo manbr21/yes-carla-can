@@ -99,6 +99,9 @@ echo "Starting CARLA simulator..."
 ./${CARLA_FOLDER_NAME}/CarlaUE4.sh -quality-level=Low -nosound -windowed -ResX=800 -ResY=600 &
 
 echo "Setting up AVTP virtual network..."
+# veth-s is moved to the host namespace below, so deleting the "sender" namespace does not remove it.
+# A leftover from a previous run makes setup.sh fail with "RTNETLINK answers: File exists".
+sudo ip link delete veth-s 2>/dev/null || true
 sudo bash "${AVTP_DIR}/setup.sh" --capture
 
 # 3. Mover a ponta veth-s para o Host (permite ao CARLA rodar no Host com acesso ao AVTP L2)

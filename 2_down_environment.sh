@@ -108,4 +108,6 @@ else
     sudo ip netns delete switch 2>/dev/null || true
 fi
 
+sudo ip link delete veth-s 2>/dev/null || true   # moved to the host namespace by 1_up_environment.sh
+
 echo "Environment is down!"

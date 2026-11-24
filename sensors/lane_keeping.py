@@ -139,6 +139,8 @@ class LaneKeepingNode(object):
         error, self._lane_width_px = lane_center_error(tags, self._lane_width_px)
         if error is None:                      # no marking visible: keep the last estimate
             error = self._last_error
+        if self._last_t is None:               # first frame: no derivative yet (avoids a kick at the start)
+            self._last_error = error
         dt = (t - self._last_t) if self._last_t is not None else 0.05
         d_error = (error - self._last_error) / dt if dt > 0 else 0.0
         self._last_error, self._last_t = error, t
