@@ -226,6 +226,28 @@ def main():
         help='CARLA map to load (e.g. "Town01", "Town10HD"). '
              'If not set, the current world is used.',
     )
+    argparser.add_argument(
+        "--psa-yaw",
+        type=float,
+        default=0.0,
+        metavar="DEG",
+        help="Perspective-Shift Attack: yaw offset (degrees) applied to the front cameras. "
+             "Positive turns the view to the right (CARLA convention). Default: 0 (no attack).",
+    )
+    argparser.add_argument(
+        "--lane-keeping",
+        choices=["off", "log", "drive"],
+        default="off",
+        help="Camera-based lane keeping node: 'log' only measures, 'drive' also sends STEER/THROTTLE over CAN.",
+    )
+    argparser.add_argument("--lk-gains", type=float, nargs=2, default=[0.5, 0.05], metavar=("KP", "KD"),
+                           help="Lane keeping PD gains (default: 0.5 0.05).")
+    argparser.add_argument("--target-speed", type=float, default=30.0, metavar="KMH", help="Lane keeping target speed (default: 30).")
+    argparser.add_argument("--run-seconds", type=float, default=0.0, metavar="S",
+                           help="Stop the lane keeping run after S seconds of driving (0 = never).")
+    argparser.add_argument("--log-csv", default=None, metavar="FILE", help="Write lane keeping measurements to this CSV file.")
+    argparser.add_argument("--spawn-index", type=int, default=None, metavar="N",
+                           help="Use spawn point N of the map instead of a random one (repeatable runs).")
     args = argparser.parse_args()
 
     args.width, args.height = [int(x) for x in args.res.split("x")]

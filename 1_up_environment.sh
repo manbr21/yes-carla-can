@@ -6,11 +6,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DBC_PATH="${DBC_PATH:-data/carla.dbc}"
 VCAN_INTERFACE="${VCAN_INTERFACE:-vcan0}"
 MAP="${MAP:-}"
+PSA_YAW="${PSA_YAW:-0}"
+LANE_KEEPING="${LANE_KEEPING:-off}"
+SPAWN_INDEX="${SPAWN_INDEX:-}"
+RUN_SECONDS="${RUN_SECONDS:-0}"
+LOG_CSV="${LOG_CSV:-}"
+LK_GAINS="${LK_GAINS:-}"   # e.g. LK_GAINS="0.4 0.05" (lane keeping KP KD)
 AVTP_DIR="${SCRIPT_DIR}/avtp_network"
 
 usage() {
     cat <<EOF
 Usage: $0 [-h|--help] [--dbc <path>] [--vcan <name>] [--map <name>]
+       [--lane-keeping off|log|drive] [--psa-yaw <deg>] [--spawn-index <n>] [--run-seconds <s>] [--log-csv <file>]
 
 Start the "Yes, CARLA CAN" simulation environment.
 
@@ -30,6 +37,12 @@ Options:
   --vcan <name>   Name of the virtual CAN interface to create (default: vcan0)
   --map <name>    CARLA map to load in the client (e.g. Town01, Town10HD).
                   If omitted, the client uses the map currently loaded by CARLA.
+  --lane-keeping <mode>
+                  Camera-based lane keeping node: off (default), log (measure only)
+                  or drive (sends STEER/THROTTLE over CAN; the keyboard sender is not started).
+  --psa-yaw <deg> Perspective-Shift Attack: yaw offset of the front cameras (default: 0 = no attack).
+  --spawn-index <n>  Use spawn point n of the map (repeatable runs). --run-seconds <s> stops the run after s seconds.
+  --log-csv <file>   Write the lane keeping measurements to a CSV file.
 
 Environment variables:
   CARLA_FOLDER_NAME     Directory where CARLA is installed (default: carla-0-9-15)
@@ -48,6 +61,11 @@ while [[ $# -gt 0 ]]; do
         --dbc) DBC_PATH="$2"; shift 2 ;;
         --vcan) VCAN_INTERFACE="$2"; shift 2 ;;
         --map) MAP="$2"; shift 2 ;;
+        --lane-keeping) LANE_KEEPING="$2"; shift 2 ;;
+        --psa-yaw) PSA_YAW="$2"; shift 2 ;;
+        --spawn-index) SPAWN_INDEX="$2"; shift 2 ;;
+        --run-seconds) RUN_SECONDS="$2"; shift 2 ;;
+        --log-csv) LOG_CSV="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
 done
@@ -118,6 +136,10 @@ if [[ -n "${MAP}" ]]; then
     echo "Requesting CARLA map: ${MAP}"
     CLIENT_ARGS+=(--map "${MAP}")
 fi
+CLIENT_ARGS+=(--lane-keeping "${LANE_KEEPING}" --psa-yaw "${PSA_YAW}" --run-seconds "${RUN_SECONDS}")
+[[ -n "${SPAWN_INDEX}" ]] && CLIENT_ARGS+=(--spawn-index "${SPAWN_INDEX}")
+[[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
+[[ -n "${LK_GAINS}" ]] && CLIENT_ARGS+=(--lk-gains ${LK_GAINS})
 
 # Executar os módulos Python no Host com sudo -E (Acesso a vcan0 + veth-s Socket RAW + localhost)
 echo ""
@@ -137,7 +159,11 @@ read -p "Pressione [ENTER] AQUI após iniciar o receiver para subir os clientes 
 echo "Starting CARLA client module..."
 sudo -E "${PYTHON_EXEC}" "${SCRIPT_DIR}/CARLA_client_module.py" "${CLIENT_ARGS[@]}" &
 
-echo "Starting vehicle controls module..."
-sudo "${PYTHON_EXEC}" "${SCRIPT_DIR}/vehicle_controls_module.py" --dbc "${DBC_PATH}" --vcan "${VCAN_INTERFACE}" &
+if [[ "${LANE_KEEPING}" == "drive" ]]; then
+    echo "Lane keeping drives the car over CAN: vehicle controls module not started."
+else
+    echo "Starting vehicle controls module..."
+    sudo "${PYTHON_EXEC}" "${SCRIPT_DIR}/vehicle_controls_module.py" --dbc "${DBC_PATH}" --vcan "${VCAN_INTERFACE}" &
+fi
 
 echo "Environment is completely up!"

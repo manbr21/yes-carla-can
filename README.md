@@ -72,6 +72,7 @@ yes-carla-can/
 │   ├── gnss.py                   #   GNSS (GPS) sensor
 │   ├── imu.py                    #   IMU sensor
 │   ├── lane_invasion.py          #   Lane invasion sensor
+│   ├── lane_keeping.py           #   Camera-based lane keeping node (Experiment #5, PSA)
 │   └── radar.py                  #   Radar sensor
 │
 ├── data/                         # Network data and analysis
@@ -552,6 +553,40 @@ You can choose a different CAN interface with `--interface`:
 ```bash
 ./collect_traffic_logs.py --duration 15 --filename can0_run.log --interface can0
 ```
+
+## Experiment #5 — Perspective-Shift Attack on a camera-based lane keeper
+
+This experiment adds a **perception attack** to the platform, next to the CAN attacks. It follows the
+[Perspective-Shift Attack](https://github.com/tum-esi/PSA) idea: a film bends the light that reaches a camera by a fixed
+angle, so the sensor looks in a slightly different direction. In the simulator this is a **yaw offset on the front camera**.
+
+A new node (`sensors/lane_keeping.py`) reads a semantic-segmentation camera mounted like the RGB camera, finds the centre of the
+ego lane from the road markings, and publishes `THROTTLE` and `STEER` frames on `vcan0`, exactly like the keyboard sender. It
+assumes a fixed camera mount. With a shifted view the lane centre appears displaced, so the node steers away from the real centre.
+
+First find a straight spawn point (a straight road makes the effect easy to see), with CARLA running:
+
+```bash
+python find_straight_spawns.py --map Town04
+```
+
+Run the benign and the attacked case from the same spawn point (the `drive` mode does not start the keyboard sender):
+
+```bash
+./1_up_environment.sh --map Town04 --lane-keeping drive --spawn-index <N> --run-seconds 40 --log-csv benign.csv
+./1_up_environment.sh --map Town04 --lane-keeping drive --spawn-index <N> --run-seconds 40 --log-csv psa20.csv --psa-yaw 20
+```
+
+`--psa-yaw` is in degrees and positive turns the view to the right (CARLA convention). The same value shifts the RGB camera shown in the
+window and streamed over AVTP. At the end of each run the node prints a summary (maximum lateral offset, time off the lane) and the CSV
+has one row per camera frame: perceived error, steering, speed and the true lateral offset from the lane centre.
+
+If the car oscillates or reacts too slowly, tune the controller with `LK_GAINS="0.4 0.05" ./1_up_environment.sh ...` (KP and KD).
+
+`--lane-keeping log` only measures, which is useful when driving with the keyboard sender or the autopilot.
+
+> The node is a deliberately simple lane keeper (road markings plus a PD controller), not the lane-detection network used in the paper.
+> It shows the mechanism: a controller that assumes a fixed camera is misled by a shifted view.
 
 # Advanced usage - Customizing network messages and periods
 

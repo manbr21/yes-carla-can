@@ -138,7 +138,7 @@ class RGBCameraSensor(object):
     DISPLAY_HEIGHT = 200
 
 
-    def __init__(self, parent_actor, gamma_correction=2.2, stream_id="0xAABBCCDDEEFF0001", interface="veth-s"):
+    def __init__(self, parent_actor, gamma_correction=2.2, stream_id="0xAABBCCDDEEFF0001", interface="veth-s", yaw_offset=0.0):
         self.sensor = None
         self.surface = None          # pygame.Surface, updated each frame
         self.array = None            # numpy (H, W, 3) uint8 RGB, updated each frame
@@ -194,7 +194,7 @@ class RGBCameraSensor(object):
         # Mount on the front hood of the vehicle, slightly elevated.
         spawn_transform = carla.Transform(
             carla.Location(x=bound_x + 0.3, z=bound_z + 0.1),
-            carla.Rotation(pitch=0.0),
+            carla.Rotation(pitch=0.0, yaw=yaw_offset),   # yaw_offset != 0 models a Perspective-Shift Attack
         )
 
         self.sensor = world.spawn_actor(

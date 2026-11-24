@@ -29,11 +29,17 @@ class World(object):
         self.radar_sensor = None
         self.camera_manager = None
         self.rgb_camera_sensor = None
+        self.lane_keeper = None
         self._weather_presets = find_weather_presets()
         self._weather_index = 0
         self._actor_filter = args.filter
         self._actor_generation = args.generation
         self._gamma = args.gamma
+        self._psa_yaw = args.psa_yaw
+        self._lane_keeping = args.lane_keeping
+        self._lane_keeping_opts = dict(target_speed_kmh=args.target_speed, run_seconds=args.run_seconds, log_path=args.log_csv,
+                                     kp=args.lk_gains[0], kd=args.lk_gains[1])
+        self._spawn_index = args.spawn_index
         self.restart()
         self.world.on_tick(hud.on_world_tick)
         self.recording_enabled = False
@@ -99,7 +105,10 @@ class World(object):
                 print('Please add some Vehicle Spawn Point to your UE4 scene.')
                 sys.exit(1)
             spawn_points = self.map.get_spawn_points()
-            spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
+            if self._spawn_index is not None:
+                spawn_point = spawn_points[self._spawn_index]
+            else:
+                spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
             self.show_vehicle_telemetry = False
             self.modify_vehicle_physics(self.player)
@@ -111,7 +120,10 @@ class World(object):
         self.camera_manager = CameraManager(self.player, self.hud, self._gamma)
         self.camera_manager.transform_index = cam_pos_index
         self.camera_manager.set_sensor(cam_index, notify=False)
-        self.rgb_camera_sensor = RGBCameraSensor(self.player, self._gamma)
+        self.rgb_camera_sensor = RGBCameraSensor(self.player, self._gamma, yaw_offset=self._psa_yaw)
+        if self._lane_keeping != "off":
+            self.lane_keeper = LaneKeepingNode(self.player, self.can_net, mode=self._lane_keeping,
+                                               psa_yaw=self._psa_yaw, **self._lane_keeping_opts)
         actor_type = get_actor_display_name(self.player)
         self.hud.notification(actor_type)
 
@@ -173,6 +185,10 @@ class World(object):
     def destroy(self):
         if self.radar_sensor is not None:
             self.toggle_radar()
+
+        if self.lane_keeper is not None:
+            self.lane_keeper.destroy()
+            self.lane_keeper = None
 
         # 1. Encerra limpadamente a câmera de streaming (fecha socket RAW + encoder + ator CARLA)
         if self.rgb_camera_sensor is not None:
