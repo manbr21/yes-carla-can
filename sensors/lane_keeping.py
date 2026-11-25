@@ -101,6 +101,11 @@ class LaneKeepingNode(object):
         # Same mount as the RGB camera (front of the car), plus the PSA yaw.
         bound_x = 0.5 + parent_actor.bounding_box.extent.x
         bound_z = 0.5 + parent_actor.bounding_box.extent.z
+        cam_height = bound_z + 0.1
+        lane_width = self._map.get_waypoint(parent_actor.get_location(), lane_type=carla.LaneType.Driving).lane_width
+        # By perspective a lane of width W seen from height h is (W / h) pixels wide per image row below the horizon.
+        self._lane_k = lane_width / cam_height
+        self._vehicle_id = parent_actor.type_id
         bp = world.get_blueprint_library().find("sensor.camera.semantic_segmentation")
         bp.set_attribute("image_size_x", str(self.IMAGE_WIDTH))
         bp.set_attribute("image_size_y", str(self.IMAGE_HEIGHT))
@@ -115,6 +120,7 @@ class LaneKeepingNode(object):
         weak_self = weakref.ref(self)
         self.sensor.listen(lambda image: LaneKeepingNode._on_image(weak_self, image))
         print(f"[LK] lane keeping '{mode}' started (PSA yaw {psa_yaw:+.1f} deg, target {target_speed_kmh:.0f} km/h)")
+        print(f"[LK] vehicle {self._vehicle_id}, camera height {cam_height:.2f} m, lane width {lane_width:.2f} m -> k = {self._lane_k:.2f}")
 
     # ------------------------------------------------------------------ ground truth for the metrics
     def _lateral_offset(self):
@@ -144,12 +150,15 @@ class LaneKeepingNode(object):
         if not self._reported_first:
             self._reported_first = True
             n_lines = int((tags == ROAD_LINE_TAG).sum())
+            fits = [(lane_center_error(tags, k)[1], k) for k in np.arange(1.5, 3.31, 0.05)]
+            best_coh, best_k = max(fits)
+            print(f"[LK] first frame: best-fit k = {best_k:.2f} (coherence {best_coh:.2f}); k in use {self._lane_k:.2f}")
             print(f"[LK] first frame: {n_lines} road-marking pixels (tag {ROAD_LINE_TAG})"
                   + ("" if n_lines else " -> none found: check ROAD_LINE_TAG or the road/spawn point"))
         if self._dump_dir and (self._last_dump is None or t - self._last_dump >= 2.0):   # for debugging the estimator
             self._last_dump = t
             image.save_to_disk(os.path.join(self._dump_dir, "seg_%05.2f.png" % t), carla.ColorConverter.CityScapesPalette)
-        error, coherence = lane_center_error(tags)
+        error, coherence = lane_center_error(tags, self._lane_k)
         if error is None or coherence < MIN_COHERENCE:   # nothing reliable in this frame: keep the last estimate
             error = self._last_error
         else:

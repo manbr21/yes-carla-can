@@ -9,6 +9,7 @@ MAP="${MAP:-}"
 PSA_YAW="${PSA_YAW:-0}"
 LANE_KEEPING="${LANE_KEEPING:-off}"
 SPAWN_INDEX="${SPAWN_INDEX:-}"
+VEHICLE="${VEHICLE:-}"       # blueprint id, e.g. vehicle.tesla.model3 (default: random; model3 when lane keeping is on)
 RUN_SECONDS="${RUN_SECONDS:-0}"
 LOG_CSV="${LOG_CSV:-}"
 LK_BIAS="${LK_BIAS:-}"     # e.g. LK_BIAS=0.12 (error measured on the benign run)
@@ -19,7 +20,7 @@ AVTP_DIR="${SCRIPT_DIR}/avtp_network"
 usage() {
     cat <<EOF
 Usage: $0 [-h|--help] [--dbc <path>] [--vcan <name>] [--map <name>]
-       [--lane-keeping off|log|drive] [--psa-yaw <deg>] [--spawn-index <n>] [--run-seconds <s>] [--log-csv <file>]
+       [--lane-keeping off|log|drive] [--psa-yaw <deg>] [--spawn-index <n>] [--vehicle <blueprint>] [--run-seconds <s>] [--log-csv <file>]
 
 Start the "Yes, CARLA CAN" simulation environment.
 
@@ -66,6 +67,7 @@ while [[ $# -gt 0 ]]; do
         --lane-keeping) LANE_KEEPING="$2"; shift 2 ;;
         --psa-yaw) PSA_YAW="$2"; shift 2 ;;
         --spawn-index) SPAWN_INDEX="$2"; shift 2 ;;
+        --vehicle) VEHICLE="$2"; shift 2 ;;
         --run-seconds) RUN_SECONDS="$2"; shift 2 ;;
         --log-csv) LOG_CSV="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
@@ -143,6 +145,10 @@ if [[ -n "${MAP}" ]]; then
 fi
 CLIENT_ARGS+=(--lane-keeping "${LANE_KEEPING}" --psa-yaw "${PSA_YAW}" --run-seconds "${RUN_SECONDS}")
 [[ -n "${SPAWN_INDEX}" ]] && CLIENT_ARGS+=(--spawn-index "${SPAWN_INDEX}")
+# The camera height (and so the lane width in the image) and the acceleration depend on the car model:
+# lane keeping runs must always use the same one to be comparable.
+if [[ -z "${VEHICLE}" && "${LANE_KEEPING}" != "off" ]]; then VEHICLE="vehicle.tesla.model3"; fi
+[[ -n "${VEHICLE}" ]] && CLIENT_ARGS+=(--filter "${VEHICLE}")
 [[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
 [[ -n "${LK_DUMP}" ]] && CLIENT_ARGS+=(--lk-dump "${LK_DUMP}")
 [[ -n "${LK_BIAS}" ]] && CLIENT_ARGS+=(--lk-bias "${LK_BIAS}")
