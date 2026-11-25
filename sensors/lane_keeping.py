@@ -136,7 +136,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE, psa_mode="rotate"):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE, psa_mode="shift"):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net

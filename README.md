@@ -726,6 +726,6 @@ The hood checks log two detectors in every run: the **centroid** rule (own adapt
 (`hood_edge_fit`: quadratic fit of the hood edge, alarm when the linear coefficient b is more than 0.1346 below the benign value, as in
 `PSA/Defense/Camera/engineHood_Detection.py`; the paper only flags a shift of the hood to the right, so negative yaws are needed to test it).
 
-`--psa-mode` chooses how the attack is simulated: `rotate` (default) turns the camera by `--psa-yaw`; `shift` moves the whole picture, hood included,
-by `f*tan(yaw)` pixels, which is what a film in front of the lens does. The hood defence only makes sense with `shift` (when the camera is turned
-inside the cabin, other parts of the car body enter the picture). `run_hood_defense.sh` uses `shift` by default.
+`--psa-mode` chooses how the attack is simulated. The default, `shift`, moves the whole picture, hood included, by `f*tan(yaw)` pixels, which is
+what a film in front of the lens does. `rotate` turns the camera inside the car instead (a misaligned camera); with the camera inside the cabin
+other parts of the car body then enter the picture, so it is not suitable for the hood defence. The first sweep of the project was made with `rotate`.
