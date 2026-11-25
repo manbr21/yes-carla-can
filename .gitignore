@@ -185,3 +185,6 @@ candump*
 *.pcap
 
 output_stream*
+# lane keeping experiment results (not versioned)
+psa_sweep_*/
+results/

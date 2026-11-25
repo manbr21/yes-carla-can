@@ -197,6 +197,8 @@ class LaneKeepingNode(object):
             self._can.send_steer_msg(controls)
             self._can.send_brake_msg(controls)
         self.print_summary()
+        if self._log:
+            self._log.flush()
 
     def print_summary(self):
         if not self._rows:

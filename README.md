@@ -703,7 +703,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-#### Results and plot
+#### Running the whole experiment
 
-`results/psa_lane_keeping/` has the CSVs of one run of each case (fixed vehicle `vehicle.tesla.model3`, Town04, spawn point 124) and the plot.
-To redo the plot: `python plot_psa_results.py benign.csv psa5.csv psa7.csv --out plot.png --t-max 13` (needs matplotlib).
+`./run_psa_sweep.sh` runs a baseline and several camera yaw offsets, each one repeated, restarting CARLA every time and always using the
+same car, map and spawn point (no receiver, no video). It writes one CSV per run to `psa_sweep_<date>/` and then calls
+`python analyze_psa_sweep.py <folder>`, which prints a table and saves `sweep.png`. Options: `--yaws "5 7 10"`, `--repeats N`, `--run-seconds S`.
+`plot_psa_results.py` plots specific CSV files. The result folders are not versioned.

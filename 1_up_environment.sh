@@ -9,6 +9,7 @@ MAP="${MAP:-}"
 PSA_YAW="${PSA_YAW:-0}"
 LANE_KEEPING="${LANE_KEEPING:-off}"
 SPAWN_INDEX="${SPAWN_INDEX:-}"
+NO_PROMPT="${NO_PROMPT:-}"   # set (e.g. NO_PROMPT=1) to skip the "start the receiver" prompt (automated runs, no video)
 VEHICLE="${VEHICLE:-}"       # blueprint id, e.g. vehicle.tesla.model3 (default: random; model3 when lane keeping is on)
 RUN_SECONDS="${RUN_SECONDS:-0}"
 LOG_CSV="${LOG_CSV:-}"
@@ -166,7 +167,9 @@ echo ""
 echo "   sudo -E DISPLAY=\$DISPLAY PYTHONPATH=. ip netns exec receiver \"\$CONDA_PREFIX/bin/python\" avtp_network/receiver.py -i veth-r -o ."
 echo ""
 echo "======================================================================"
-read -p "Pressione [ENTER] AQUI após iniciar o receiver para subir os clientes do CARLA..."
+if [[ -z "${NO_PROMPT}" ]]; then
+    read -p "Pressione [ENTER] AQUI após iniciar o receiver para subir os clientes do CARLA..."
+fi
 
 # Executar os módulos Python no Host
 echo "Starting CARLA client module..."
