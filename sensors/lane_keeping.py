@@ -25,7 +25,7 @@ ROAD_LINE_TAG = 24   # semantic label of road markings in CARLA 0.9.15 (CityScap
 
 LANE_K = 2.2        # lane width in pixels per image row below the horizon (measured on Town04 highway frames)
 REF_DY = 35.0       # image row (pixels below the horizon) where the returned error is expressed
-MIN_COHERENCE = 0.5
+MIN_COHERENCE = 0.25   # below this the frame is ignored (the last estimate is kept); under a PSA the grid is distorted and coherence drops to ~0.3-0.5
 
 
 def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE_TAG):
