@@ -702,3 +702,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+#### Results and plot
+
+`results/psa_lane_keeping/` has the CSVs of one run of each case (fixed vehicle `vehicle.tesla.model3`, Town04, spawn point 124) and the plot.
+To redo the plot: `python plot_psa_results.py benign.csv psa5.csv psa7.csv --out plot.png --t-max 13` (needs matplotlib).
