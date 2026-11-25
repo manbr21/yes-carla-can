@@ -15,34 +15,45 @@ _spec.loader.exec_module(lk)
 H, W = 200, 480
 
 
-def tags_with_lines(left_x, right_x):
-    """Synthetic semantic image with a vertical road marking at each given column (None = absent)."""
+K = 2.4   # lane width in pixels per row below the horizon
+
+
+def tags_lane(shift=0, left=True, right=True):
+    """Synthetic semantic image: a lane that widens towards the bottom, centred at the image centre + shift."""
     tags = np.zeros((H, W), dtype=np.uint8)
-    for x in (left_x, right_x):
-        if x is not None:
-            tags[:, x - 2:x + 3] = lk.ROAD_LINE_TAG
+    for y in range(H // 2 + 1, H):
+        half = K * (y - H // 2) / 2.0
+        for present, x in ((left, W / 2 + shift - half), (right, W / 2 + shift + half)):
+            if present:
+                tags[y, int(x) - 2:int(x) + 3] = lk.ROAD_LINE_TAG
     return tags
 
 
 def test_centered_lane_gives_zero_error():
-    error, width = lk.lane_center_error(tags_with_lines(120, 360))
+    error, k = lk.lane_center_error(tags_lane())
     assert error == pytest.approx(0.0, abs=0.01)
-    assert width == pytest.approx(240, abs=6)
+    assert k == pytest.approx(K, abs=0.2)
 
 
 def test_lane_centre_to_the_right_gives_positive_error():
-    error, _ = lk.lane_center_error(tags_with_lines(150, 390))      # centre at 270 -> 30 px right of 240
+    error, _ = lk.lane_center_error(tags_lane(shift=30))
     assert error == pytest.approx(30 / 240, abs=0.02)
 
 
-def test_single_marking_uses_last_known_lane_width():
-    error, _ = lk.lane_center_error(tags_with_lines(120, None), lane_width_px=240)
-    assert error == pytest.approx(0.0, abs=0.02)
+def test_single_marking_uses_the_width_of_its_own_row():
+    for kwargs in (dict(right=False), dict(left=False)):
+        error, _ = lk.lane_center_error(tags_lane(**kwargs), lane_k=K)
+        assert error == pytest.approx(0.0, abs=0.02)
+
+
+def test_single_marking_without_known_width_gives_none():
+    error, k = lk.lane_center_error(tags_lane(right=False))
+    assert error is None and k is None
 
 
 def test_no_marking_returns_none():
-    error, width = lk.lane_center_error(tags_with_lines(None, None), lane_width_px=200)
-    assert error is None and width == 200
+    error, k = lk.lane_center_error(tags_lane(left=False, right=False), lane_k=2.0)
+    assert error is None and k == 2.0
 
 
 def test_steering_law_sign_and_saturation():
@@ -75,7 +86,7 @@ def _image(tags, t):
 
 def test_node_sends_can_commands_after_warmup(tmp_path):
     node, can = _node(log_path=str(tmp_path / "run.csv"))
-    tags = tags_with_lines(150, 390)                               # lane centre right of the image centre
+    tags = tags_lane(shift=30)                               # lane centre right of the image centre
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 0.0))  # warm-up frame: no command
     can.send_steer_msg.assert_not_called()
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 4.0))
@@ -87,7 +98,7 @@ def test_node_sends_can_commands_after_warmup(tmp_path):
 
 def test_log_mode_never_sends_can(tmp_path):
     node, can = _node(mode="log")
-    tags = tags_with_lines(120, 360)
+    tags = tags_lane()
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 0.0))
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 5.0))   # past warm-up: it measures, but does not send
     assert len(node._rows) == 1
@@ -98,7 +109,7 @@ def test_log_mode_never_sends_can(tmp_path):
 
 def test_run_ends_with_brake():
     node, can = _node(run_seconds=2.0)
-    tags = tags_with_lines(120, 360)
+    tags = tags_lane()
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 0.0))
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 4.0))
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 8.0))   # past warm-up (3 s) + run (2 s)

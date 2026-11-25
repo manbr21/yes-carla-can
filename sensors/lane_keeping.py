@@ -22,33 +22,38 @@ import carla
 ROAD_LINE_TAG = 24   # semantic label of road markings in CARLA 0.9.15 (CityScapes palette)
 
 
-def lane_center_error(tags, lane_width_px=None, rows=(0.60, 0.75), line_tag=ROAD_LINE_TAG):
+def lane_center_error(tags, lane_k=None, rows=(0.60, 0.75), line_tag=ROAD_LINE_TAG):
     """Estimate where the ego-lane centre is in the image.
 
-    tags          (H, W) array of semantic labels
-    lane_width_px last known lane width in pixels, used when only one marking is visible
-    Returns (error, lane_width_px). error is in [-1, 1] (+ = lane centre to the right of the image centre),
-    or None when no marking is visible.
+    tags    (H, W) array of semantic labels
+    lane_k  last known lane width in pixels per image row below the horizon. By perspective the lane
+            gets wider towards the bottom of the image (width = k * (row - horizon)), so a single marking
+            is completed with the width of ITS row, not with one fixed width.
+    Returns (error, lane_k). error is in [-1, 1] (+ = lane centre to the right of the image centre),
+    or None when no marking is visible. The camera looks straight ahead, so the horizon is the middle row.
     """
     height, width = tags.shape
-    cx = width / 2.0
-    centers, widths = [], []
+    cx, horizon = width / 2.0, height / 2.0
+    centers, ks = [], []
     for y in range(int(rows[0] * height), int(rows[1] * height), 2):
+        dy = y - horizon
+        if dy <= 0:
+            continue
         xs = np.flatnonzero(tags[y] == line_tag)
         left, right = xs[xs < cx], xs[xs >= cx]
         if left.size and right.size:
             centers.append((left.max() + right.min()) / 2.0)
-            widths.append(right.min() - left.max())
-        elif lane_width_px and left.size:
-            centers.append(left.max() + lane_width_px / 2.0)
-        elif lane_width_px and right.size:
-            centers.append(right.min() - lane_width_px / 2.0)
+            ks.append((right.min() - left.max()) / dy)
+        elif lane_k and left.size:             # dashed marking on the other side
+            centers.append(left.max() + lane_k * dy / 2.0)
+        elif lane_k and right.size:
+            centers.append(right.min() - lane_k * dy / 2.0)
     if not centers:
-        return None, lane_width_px
-    if widths:
-        w = float(np.median(widths))
-        lane_width_px = w if not lane_width_px else 0.8 * lane_width_px + 0.2 * w
-    return float((np.median(centers) - cx) / cx), lane_width_px
+        return None, lane_k
+    if ks:
+        k = float(np.median(ks))
+        lane_k = k if not lane_k else 0.8 * lane_k + 0.2 * k
+    return float((np.median(centers) - cx) / cx), lane_k
 
 
 def steering_law(error, d_error, kp, kd, max_steer):
@@ -79,7 +84,7 @@ class LaneKeepingNode(object):
         self._t0 = None
         self._last_t = None
         self._last_error = 0.0
-        self._lane_width_px = None
+        self._lane_k = None
         self._ref_lane = None            # (road_id, lane_id) of the lane the car started in
         self._rows = []                  # (t, error, steer, speed_kmh, lateral_m, off_lane)
         self._finished = False
@@ -137,7 +142,7 @@ class LaneKeepingNode(object):
             n_lines = int((tags == ROAD_LINE_TAG).sum())
             print(f"[LK] first frame: {n_lines} road-marking pixels (tag {ROAD_LINE_TAG})"
                   + ("" if n_lines else " -> none found: check ROAD_LINE_TAG or the road/spawn point"))
-        error, self._lane_width_px = lane_center_error(tags, self._lane_width_px)
+        error, self._lane_k = lane_center_error(tags, self._lane_k)
         if error is None:                      # no marking visible: keep the last estimate
             error = self._last_error
         else:
