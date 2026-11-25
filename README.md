@@ -717,3 +717,7 @@ shows up at the bottom of the image. The hood belongs to the car, so it should a
 or `--psa-yaw`), the hood moves with it. `--defense detect` logs an alarm, `--defense stop` also brakes, `--defense compensate` removes the shift
 measured on the hood from the lane estimate. Result CSVs get two more columns: `hood_shift_px` and `alarm`.
 This is an adaptation of the camera defence of the paper (which fits a curve to the hood outline), not the same method.
+
+`./run_hood_defense.sh` runs the whole hood defence experiment: it looks for a camera position where the hood is visible (and measures where it sits
+without attack), then runs each yaw with the defence off and on, and plots the result with `analyze_hood_defense.py`. `--probe-only` stops after the
+first step so the images can be inspected.

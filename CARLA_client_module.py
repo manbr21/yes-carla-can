@@ -247,6 +247,8 @@ def main():
                            help="Lane keeping PD gains (default: 0.5 0.05).")
     argparser.add_argument("--camera-x", type=float, default=None, metavar="X",
                            help="Lane keeping camera position, metres from the car centre (default: in front of the car; 0.6 shows the hood).")
+    argparser.add_argument("--hood-ref", type=float, default=0.0, metavar="PX",
+                           help="Hood position (px from the image centre) measured without attack; the defence works on the difference.")
     argparser.add_argument("--defense", choices=["off", "detect", "stop", "compensate"], default="off",
                            help="Hood defence: detect = alarm only, stop = alarm and brake, compensate = undo the shift.")
     argparser.add_argument("--lk-dump", default=None, metavar="DIR", help="Save a segmentation image every 2 s into DIR (debug).")

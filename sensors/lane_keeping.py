@@ -90,7 +90,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off"):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -102,6 +102,7 @@ class LaneKeepingNode(object):
         self._dump_dir, self._last_dump = dump_dir, None
         if dump_dir:
             os.makedirs(dump_dir, exist_ok=True)
+        self._hood_ref = hood_ref        # where the hood sits when nothing is wrong (measured on a run without attack)
         self.defense = defense           # "off", "detect" (log + alarm), "stop" (alarm + brake), "compensate" (undo the shift)
         self._hood_ema = None
         self._alarm_count = 0
@@ -193,6 +194,7 @@ class LaneKeepingNode(object):
             print(f"[LK] bottom of the image: {top}; hood {'visible' if hood is not None else 'NOT visible'}"
                   + (f" ({n_hood} px, {hood:+.1f} px from the centre)" if hood is not None else ""))
         if hood is not None:
+            hood -= self._hood_ref
             self._hood_ema = hood if self._hood_ema is None else 0.8 * self._hood_ema + 0.2 * hood
             self._alarm_count = self._alarm_count + 1 if abs(self._hood_ema) > HOOD_TOL_PX else 0
         alarm = self._alarm_count >= ALARM_FRAMES

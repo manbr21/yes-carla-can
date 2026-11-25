@@ -182,3 +182,10 @@ def test_compensate_defence_steers_straight_under_attack():
     on.defense, on._lane_k = "compensate", K
     _frames(on, attacked, n=30)
     assert abs(on._rows[-1][1]) < 0.02 < abs(off._rows[-1][1])        # perceived error: ~0 with the defence, clearly off without
+
+
+def test_hood_reference_is_subtracted():
+    node, _ = _node()
+    node.defense, node._hood_ref = "detect", -30.0                    # the hood naturally sits 30 px to the left
+    _frames(node, with_hood(tags_lane(), -30))
+    assert node._alarm_t is None                                       # ... so this is not a shift
