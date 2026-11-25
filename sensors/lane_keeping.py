@@ -90,13 +90,13 @@ class LaneKeepingNode(object):
         self._last_t = None
         self._last_error = 0.0
         self._ref_lane = None            # (road_id, lane_id) of the lane the car started in
-        self._rows = []                  # (t, error, steer, speed_kmh, lateral_m, off_lane)
+        self._rows = []                  # (t, error, steer, speed_kmh, lateral_m, off_lane, coherence)
         self._finished = False
         self._reported_first = False
         self._log = open(log_path, "w", newline="") if log_path else None
         self._writer = csv.writer(self._log) if self._log else None
         if self._writer:
-            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane"])
+            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane", "coherence"])
 
         # Same mount as the RGB camera (front of the car), plus the PSA yaw.
         bound_x = 0.5 + parent_actor.bounding_box.extent.x
@@ -174,7 +174,7 @@ class LaneKeepingNode(object):
             self._can.send_steer_msg(controls)
 
         lateral, off_lane = self._lateral_offset()
-        row = (t, error, steer, speed * 3.6, lateral, int(off_lane))
+        row = (t, error, steer, speed * 3.6, lateral, int(off_lane), coherence)
         self._rows.append(row)
         if self._writer:
             self._writer.writerow([f"{x:.3f}" if isinstance(x, float) else x for x in row])
