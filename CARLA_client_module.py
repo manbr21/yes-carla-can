@@ -245,6 +245,7 @@ def main():
     )
     argparser.add_argument("--lk-gains", type=float, nargs=2, default=[0.5, 0.05], metavar=("KP", "KD"),
                            help="Lane keeping PD gains (default: 0.5 0.05).")
+    argparser.add_argument("--lk-dump", default=None, metavar="DIR", help="Save a segmentation image every 2 s into DIR (debug).")
     argparser.add_argument("--lk-bias", type=float, default=0.0, metavar="E",
                            help="Perceived-error offset measured once WITHOUT attack (camera calibration), subtracted by the controller.")
     argparser.add_argument("--target-speed", type=float, default=30.0, metavar="KMH", help="Lane keeping target speed (default: 30).")

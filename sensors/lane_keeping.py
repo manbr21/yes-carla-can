@@ -13,6 +13,7 @@ Modes
     "drive"  also sends THROTTLE and STEER over CAN (do not run vehicle_controls_module at the same time)
 """
 import csv
+import os
 import time
 import weakref
 
@@ -68,7 +69,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -77,6 +78,9 @@ class LaneKeepingNode(object):
         self._target_speed = target_speed_kmh / 3.6
         self._run_seconds = run_seconds
         self._kp, self._kd, self._max_steer = kp, kd, max_steer
+        self._dump_dir, self._last_dump = dump_dir, None
+        if dump_dir:
+            os.makedirs(dump_dir, exist_ok=True)
         self._bias = bias                # calibration: error measured on the benign run at the start
 
         world = parent_actor.get_world()
@@ -142,6 +146,9 @@ class LaneKeepingNode(object):
             n_lines = int((tags == ROAD_LINE_TAG).sum())
             print(f"[LK] first frame: {n_lines} road-marking pixels (tag {ROAD_LINE_TAG})"
                   + ("" if n_lines else " -> none found: check ROAD_LINE_TAG or the road/spawn point"))
+        if self._dump_dir and (self._last_dump is None or t - self._last_dump >= 2.0):   # for debugging the estimator
+            self._last_dump = t
+            image.save_to_disk(os.path.join(self._dump_dir, "seg_%05.2f.png" % t), carla.ColorConverter.CityScapesPalette)
         error, self._lane_k = lane_center_error(tags, self._lane_k)
         if error is None:                      # no marking visible: keep the last estimate
             error = self._last_error
