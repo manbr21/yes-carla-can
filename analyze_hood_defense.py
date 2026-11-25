@@ -48,9 +48,9 @@ def main():
         print("no runs found in", folder)
         return
     yaws = sorted(set(off) | set(on))
-    print("%-5s %14s %14s %10s %10s %10s %14s %14s" % ("yaw", "sem defesa (m)", "com defesa (m)", "alarme", "alarme", "b (artigo)", "capô medido", "capô previsto"))
-    print("%-5s %14s %14s %10s %10s %10s" % ("", "", "", "(centroide)", "(artigo)", ""))
-    rows = []
+    print("%-5s %14s %14s %11s %9s %10s %9s %13s %13s" % ("yaw", "sem defesa (m)", "com defesa (m)", "alarme", "alarme", "b (artigo)", "delta b", "capô medido", "capô previsto"))
+    print("%-5s %14s %14s %11s %9s   (o artigo alarma com delta b < -0,1346)" % ("", "", "", "(centroide)", "(artigo)"))
+    rows, extra, bs = [], [], {}
     for yaw in yaws:
         a = steady(off[yaw]) if yaw in off else float("nan")
         b = steady(on[yaw]) if yaw in on else float("nan")
@@ -68,7 +68,12 @@ def main():
             bmean = float(np.nanmean(src["hood_b"][s]))
         pred = -FOCAL_PX * np.tan(np.radians(yaw))
         rows.append((yaw, a, b, hood, pred))
-        print("%-5d %+14.2f %+14.2f %10s %10s %+10.4f %+11.1f px %+11.1f px" % (yaw, a, b, alarm, alarm_p, bmean, hood, pred))
+        bs[yaw] = bmean
+        extra.append((yaw, a, b, alarm, alarm_p, bmean, hood, pred))
+
+    b0 = bs.get(0, float("nan"))
+    for yaw, a, b, alarm, alarm_p, bmean, hood, pred in extra:
+        print("%-5d %+14.2f %+14.2f %11s %9s %+10.4f %+9.4f %+10.1f px %+10.1f px" % (yaw, a, b, alarm, alarm_p, bmean, bmean - b0, hood, pred))
 
     try:
         import matplotlib
