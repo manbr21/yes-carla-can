@@ -64,25 +64,47 @@ def main():
         print("\n(matplotlib not installed: no plot)")
         return
     ink, muted, grid = "#0b0b0b", "#52514e", "#e3e2de"
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.6), facecolor="#fcfcfb")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.5, 4.8), facecolor="#fcfcfb")
     yaws = sorted(steady)
+    half = LANE_WIDTH / 2
+    # Simple geometric model: the controller looks at the road about Z metres ahead, so a camera turned by theta sees the lane
+    # Z*tan(theta) to the side; the car moves until it looks centred again. The estimator only sees the lane position modulo
+    # one lane width, so beyond half a lane the answer wraps around to the other side. Z is fitted on the small angles only.
+    small = [y for y in yaws if 0 < y <= 8]
+    z_eff = np.mean([abs(np.mean(steady[y]) - base) / np.tan(np.radians(y)) for y in small]) if small else None
+    if z_eff:
+        grid_deg = np.linspace(0, max(yaws) + 1, 400)
+        raw = -z_eff * np.tan(np.radians(grid_deg))
+        wrapped = (raw + half) % LANE_WIDTH - half + base
+        wrapped[np.abs(np.diff(wrapped, prepend=wrapped[0])) > half] = np.nan      # no line across the wrap
+        a1.plot(grid_deg, wrapped, color=muted, linewidth=1.5, linestyle=(0, (1, 2)), zorder=1,
+                label="modelo: %.1f m x tan(ângulo), com volta de faixa" % z_eff)
     for yaw in yaws:
-        a1.scatter([yaw] * len(steady[yaw]), steady[yaw], color="#2a78d6", s=36, zorder=3)
-    a1.plot(yaws, [np.mean(steady[y]) for y in yaws], color="#2a78d6", linewidth=2, zorder=2)
-    a1.axhline(-LANE_WIDTH / 2, color=muted, linestyle=(0, (4, 3)), linewidth=1)
-    a1.text(yaws[-1], -LANE_WIDTH / 2 + 0.06, "limite da faixa", color=muted, fontsize=9, ha="right", va="bottom")
+        a1.scatter([yaw] * len(steady[yaw]), steady[yaw], color="#2a78d6", s=42, zorder=3,
+                   label="medido (cada ponto é uma rodada)" if yaw == yaws[0] else None)
+    for edge in (-half, half):
+        a1.axhline(edge, color=muted, linestyle=(0, (4, 3)), linewidth=1)
+    a1.text(0.2, half + 0.04, "limite da faixa", color=muted, fontsize=9, va="bottom")
+    a1.axhline(0, color=muted, linewidth=0.8)
+    a1.set_ylim(-2.1, 2.1)
     a1.set_xlabel("Giro da câmera (graus, 0 = sem ataque)", color=ink)
-    a1.set_ylabel("Desvio lateral estável (m)", color=ink)
+    a1.set_ylabel("Desvio lateral estável (m)\n(negativo = esquerda)", color=ink)
     a1.set_title("Desvio causado pelo ataque", loc="left", color=ink, fontweight="bold")
+    a1.legend(frameon=False, fontsize=9, loc="upper left", bbox_to_anchor=(0.0, 0.86))
     ramp = plt.cm.Blues(np.linspace(0.35, 0.95, len(yaws)))
+    t_end = 0
     for color, yaw in zip(ramp, yaws):
         key = (yaw, min(r for (y, r) in runs if y == yaw))
         d, lat = runs[key]
-        a2.plot(d["t_s"], lat, color=color, linewidth=2, label="%d°" % yaw if yaw else "sem ataque")
-    a2.axhline(-LANE_WIDTH / 2, color=muted, linestyle=(0, (4, 3)), linewidth=1)
+        a2.plot(d["t_s"], lat, color=color, linewidth=2)
+        t_end = max(t_end, d["t_s"][-1])
+        a2.text(d["t_s"][-1] + 0.2, lat[-1], "%d°" % yaw if yaw else "sem ataque", color=ink, fontsize=9, va="center")
+    for edge in (-half, half):
+        a2.axhline(edge, color=muted, linestyle=(0, (4, 3)), linewidth=1)
+    a2.set_ylim(-2.1, 2.1)
+    a2.set_xlim(3, t_end + 2.2)
     a2.set_xlabel("Tempo de simulação (s)", color=ink)
     a2.set_title("Desvio ao longo do tempo (1ª repetição)", loc="left", color=ink, fontweight="bold")
-    a2.legend(frameon=False, fontsize=9, ncol=2, loc="lower left", bbox_to_anchor=(0.0, 0.1))
     for ax in (a1, a2):
         ax.set_facecolor("#fcfcfb")
         ax.grid(axis="y", color=grid, linewidth=0.8)
