@@ -111,6 +111,18 @@ def hood_edge_fit(tags, car_tags=HOOD_TAGS, rows=HOOD_EDGE_ROWS, min_points=MIN_
     return float(a), float(b), float(c), len(xs)
 
 
+def shift_tags(tags, dx):
+    """Move the whole image dx pixels to the right (dx < 0: to the left). The columns that come in are left empty (label 0)."""
+    if dx == 0:
+        return tags
+    out = np.zeros_like(tags)
+    if dx > 0:
+        out[:, dx:] = tags[:, :-dx]
+    else:
+        out[:, :dx] = tags[:, -dx:]
+    return out
+
+
 def steering_law(error, d_error, kp, kd, max_steer):
     """PD controller. CARLA steer: positive turns right, range [-1, 1]."""
     return float(np.clip(kp * error + kd * d_error, -max_steer, max_steer))
@@ -120,15 +132,20 @@ class LaneKeepingNode(object):
     IMAGE_WIDTH = 480
     IMAGE_HEIGHT = 200
     FOV = 90
+    FOCAL_PX = IMAGE_WIDTH / 2.0 / np.tan(np.radians(FOV / 2.0))
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE, psa_mode="rotate"):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
         self.mode = mode
         self.psa_yaw = psa_yaw
+        # "rotate": the sensor is turned by psa_yaw inside the car (what the camera sees of the car itself changes).
+        # "shift": the whole picture, hood included, is moved sideways by f*tan(psa_yaw) pixels, as a film in front of the lens
+        # would do (the paper's example shows the hood moved together with the scene).
+        self._psa_shift_px = 0 if psa_mode == "rotate" else int(round(-self.FOCAL_PX * np.tan(np.radians(psa_yaw))))
         self._target_speed = target_speed_kmh / 3.6
         self._run_seconds = run_seconds
         self._kp, self._kd, self._max_steer = kp, kd, max_steer
@@ -180,13 +197,14 @@ class LaneKeepingNode(object):
         cam_x = bound_x + 0.3 if camera_x is None else camera_x
         transform = carla.Transform(
             carla.Location(x=cam_x, z=bound_z + 0.1),
-            carla.Rotation(yaw=psa_yaw),
+            carla.Rotation(yaw=psa_yaw if psa_mode == "rotate" else 0.0),
         )
         self.sensor = world.spawn_actor(bp, transform, attach_to=parent_actor,
                                         attachment_type=carla.AttachmentType.Rigid)
         weak_self = weakref.ref(self)
         self.sensor.listen(lambda image: LaneKeepingNode._on_image(weak_self, image))
         print(f"[LK] lane keeping '{mode}' started (PSA yaw {psa_yaw:+.1f} deg, target {target_speed_kmh:.0f} km/h)")
+        print(f"[LK] PSA mode '{psa_mode}'" + (f": the image is shifted by {self._psa_shift_px:+d} px" if psa_mode != "rotate" else ""))
         print(f"[LK] camera x = {cam_x:.2f} m from the car centre, hood defence '{defense}'")
         print(f"[LK] vehicle {self._vehicle_id}, camera height {cam_height:.2f} m, lane width {lane_width:.2f} m -> k = {self._lane_k:.2f}")
 
@@ -215,6 +233,8 @@ class LaneKeepingNode(object):
             return
 
         tags = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)[:, :, 2]
+        if self._psa_shift_px:
+            tags = shift_tags(tags, self._psa_shift_px)
         if not self._reported_first:
             self._reported_first = True
             n_lines = int((tags == ROAD_LINE_TAG).sum())

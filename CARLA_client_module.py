@@ -249,6 +249,8 @@ def main():
                            help="Lane keeping camera position, metres from the car centre (default: in front of the car; 0.6 shows the hood).")
     argparser.add_argument("--hood-ref", type=float, default=0.0, metavar="PX",
                            help="Hood position (px from the image centre) measured without attack; the defence works on the difference.")
+    argparser.add_argument("--psa-mode", choices=["rotate", "shift"], default="rotate",
+                           help="rotate: turn the camera by --psa-yaw; shift: shift the whole image (hood included) by the same angle.")
     argparser.add_argument("--hood-b-ref", type=float, default=-0.0154, metavar="B",
                            help="Benign value of the paper's linear coefficient b on this camera (default: the paper's own example).")
     argparser.add_argument("--defense", choices=["off", "detect", "stop", "compensate"], default="off",

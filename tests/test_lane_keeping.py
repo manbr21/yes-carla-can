@@ -62,7 +62,7 @@ def test_steering_law_sign_and_saturation():
     assert lk.steering_law(5.0, 0.0, 0.5, 0.05, 0.5) == 0.5
 
 
-def _node(mode="drive", run_seconds=0.0, log_path=None):
+def _node(mode="drive", run_seconds=0.0, log_path=None, **kwargs):
     """LaneKeepingNode wired to mocks."""
     parent = MagicMock()
     parent.bounding_box.extent.x, parent.bounding_box.extent.z = 2.3, 0.7
@@ -74,7 +74,7 @@ def _node(mode="drive", run_seconds=0.0, log_path=None):
     wp.road_id, wp.lane_id, wp.lane_width = 1, -1, 3.5
     parent.get_world.return_value.get_map.return_value.get_waypoint.return_value = wp
     can = MagicMock()
-    node = lk.LaneKeepingNode(parent, can, mode=mode, run_seconds=run_seconds, log_path=log_path)
+    node = lk.LaneKeepingNode(parent, can, mode=mode, run_seconds=run_seconds, log_path=log_path, **kwargs)
     return node, can
 
 
@@ -231,3 +231,24 @@ def test_paper_rule_alarm_relative_to_the_benign_coefficient():
 
 def with_hood_arch(shift):
     return np.maximum(arch_hood(shift, 1.5e-3), tags_lane())
+
+
+# ---------------------------------------------------------------- PSA as an image shift (hood moves with the scene)
+def test_shift_tags_moves_the_picture():
+    img = with_hood(tags_lane())
+    left = lk.shift_tags(img, -29)
+    assert lk.hood_shift(left)[0] == pytest.approx(-29.0, abs=1.5)
+    assert lk.hood_shift(lk.shift_tags(img, 25))[0] == pytest.approx(25.0, abs=1.5)
+    assert lk.shift_tags(img, 0) is img
+
+
+def test_shift_mode_moves_hood_and_lines_together_and_the_defence_undoes_it():
+    img = with_hood(tags_lane())
+    attacked, protected = _node(psa_yaw=5.0, psa_mode="shift"), _node(psa_yaw=5.0, psa_mode="shift")
+    attacked[0].defense, protected[0].defense = "off", "compensate"
+    for node, _ in (attacked, protected):
+        node._lane_k = K
+        _frames(node, img, n=30)
+    assert attacked[0]._psa_shift_px == -21                           # 240 * tan(5 deg), to the left for a positive yaw
+    assert attacked[0]._hood_ema == pytest.approx(-21.0, abs=1.5)     # the hood moved with the scene
+    assert abs(protected[0]._rows[-1][1]) < 0.02 < abs(attacked[0]._rows[-1][1])

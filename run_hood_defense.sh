@@ -15,7 +15,7 @@ set -u
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 YAWS="-20 -10 0 10 20"; DEFENSES="off compensate"; RUN_SECONDS=15; SPAWN=124; MAP=Town04
-CANDIDATES="0.6 0.9 0.3 1.2"; CAMERA_X=""; PROBE_ONLY=0; REPEATS=1
+CANDIDATES="0.6 0.9 0.3 1.2"; CAMERA_X=""; PSA_MODE="shift"; PROBE_ONLY=0; REPEATS=1
 OUT="hood_defense_$(date +%Y%m%d_%H%M)"
 MIN_HOOD_PX=800
 
@@ -29,6 +29,7 @@ while [[ $# -gt 0 ]]; do
         --candidates) CANDIDATES="$2"; shift 2 ;;
         --camera-x) CAMERA_X="$2"; shift 2 ;;
         --repeats) REPEATS="$2"; shift 2 ;;
+        --psa-mode) PSA_MODE="$2"; shift 2 ;;     # shift (default, hood moves with the scene) | rotate
         --out) OUT="$2"; shift 2 ;;
         --probe-only) PROBE_ONLY=1; shift ;;
         -h|--help) sed -n 2,14p "$0"; exit 0 ;;
@@ -58,7 +59,7 @@ run_one() {
     echo -n "[$(date +%H:%M:%S)] ${dir}/${name} (yaw ${yaw}, defence ${defense}, camera x ${camx}) ... "
     LK_DUMP="${dump}" NO_PROMPT=1 ./1_up_environment.sh --map "${MAP}" --lane-keeping drive --spawn-index "${SPAWN}" \
         --run-seconds "${secs}" --psa-yaw "${yaw}" --log-csv "${csv}" --camera-x "${camx}" --defense "${defense}" \
-        --hood-ref "${ref}" --hood-b-ref "${bref}" > "${log}" 2>&1
+        --hood-ref "${ref}" --hood-b-ref "${bref}" --psa-mode "${PSA_MODE}" > "${log}" 2>&1
     local waited=0 limit=$((secs * 25 + 120))
     until grep -q "\[LK\] summary" "${log}" 2>/dev/null; do
         sleep 2; waited=$((waited + 2))
@@ -110,6 +111,7 @@ echo "${CAMERA_X} ${HOOD_REF} ${HOOD_B}" > "${OUT}/camera_and_reference.txt"
 [[ ${PROBE_ONLY} -eq 1 ]] && { echo "Probe only: done. Images in ${OUT}/probe_x${CAMERA_X}/"; exit 0; }
 
 # ---------------------------------------------------------------- 2. runs
+echo "== PSA mode: ${PSA_MODE}"
 echo "== Step 2: yaws [${YAWS}] x defences [${DEFENSES}] x ${REPEATS} repeat(s)"
 for rep in $(seq 1 "${REPEATS}"); do
     for yaw in ${YAWS}; do

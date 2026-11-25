@@ -10,6 +10,7 @@ PSA_YAW="${PSA_YAW:-0}"
 LANE_KEEPING="${LANE_KEEPING:-off}"
 SPAWN_INDEX="${SPAWN_INDEX:-}"
 CAMERA_X="${CAMERA_X:-}"     # lane keeping camera x (m from the car centre); 0.6 shows the hood
+PSA_MODE="${PSA_MODE:-rotate}"   # rotate (turn the camera) | shift (shift the whole image, hood included)
 HOOD_B_REF="${HOOD_B_REF:--0.0154}"   # benign value of the paper's linear coefficient on this camera
 HOOD_REF="${HOOD_REF:-0}"    # hood position measured without attack (px)
 DEFENSE="${DEFENSE:-off}"    # hood defence: off | detect | stop | compensate
@@ -77,6 +78,7 @@ while [[ $# -gt 0 ]]; do
         --defense) DEFENSE="$2"; shift 2 ;;
         --hood-ref) HOOD_REF="$2"; shift 2 ;;
         --hood-b-ref) HOOD_B_REF="$2"; shift 2 ;;
+        --psa-mode) PSA_MODE="$2"; shift 2 ;;
         --run-seconds) RUN_SECONDS="$2"; shift 2 ;;
         --log-csv) LOG_CSV="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
@@ -159,7 +161,7 @@ CLIENT_ARGS+=(--lane-keeping "${LANE_KEEPING}" --psa-yaw "${PSA_YAW}" --run-seco
 if [[ -z "${VEHICLE}" && "${LANE_KEEPING}" != "off" ]]; then VEHICLE="vehicle.tesla.model3"; fi
 [[ -n "${VEHICLE}" ]] && CLIENT_ARGS+=(--filter "${VEHICLE}")
 [[ -n "${CAMERA_X}" ]] && CLIENT_ARGS+=(--camera-x "${CAMERA_X}")
-CLIENT_ARGS+=(--defense "${DEFENSE}" --hood-ref "${HOOD_REF}" --hood-b-ref "${HOOD_B_REF}")
+CLIENT_ARGS+=(--defense "${DEFENSE}" --hood-ref "${HOOD_REF}" --hood-b-ref "${HOOD_B_REF}" --psa-mode "${PSA_MODE}")
 [[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
 [[ -n "${LK_DUMP}" ]] && CLIENT_ARGS+=(--lk-dump "${LK_DUMP}")
 [[ -n "${LK_BIAS}" ]] && CLIENT_ARGS+=(--lk-bias "${LK_BIAS}")
