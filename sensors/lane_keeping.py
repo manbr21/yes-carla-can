@@ -23,38 +23,39 @@ import carla
 ROAD_LINE_TAG = 24   # semantic label of road markings in CARLA 0.9.15 (CityScapes palette)
 
 
-def lane_center_error(tags, lane_k=None, rows=(0.60, 0.75), line_tag=ROAD_LINE_TAG):
-    """Estimate where the ego-lane centre is in the image.
+LANE_K = 2.2        # lane width in pixels per image row below the horizon (measured on Town04 highway frames)
+REF_DY = 35.0       # image row (pixels below the horizon) where the returned error is expressed
+MIN_COHERENCE = 0.5
 
-    tags    (H, W) array of semantic labels
-    lane_k  last known lane width in pixels per image row below the horizon. By perspective the lane
-            gets wider towards the bottom of the image (width = k * (row - horizon)), so a single marking
-            is completed with the width of ITS row, not with one fixed width.
-    Returns (error, lane_k). error is in [-1, 1] (+ = lane centre to the right of the image centre),
-    or None when no marking is visible. The camera looks straight ahead, so the horizon is the middle row.
+
+def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE_TAG):
+    """Estimate where the centre of the nearest lane is, relative to the image centre.
+
+    The road has several lanes and the markings are dashed, so in a given frame only a few lines are
+    visible and they may belong to different lanes. But all markings sit on a regular grid: by perspective
+    the lines are spaced lane_k * dy pixels apart at dy pixels below the horizon. So for every marking
+    pixel we take its position inside that grid ("phase", in lane widths) and average the phases. A single
+    visible line is enough, and it does not matter which lane it belongs to. The camera looks straight
+    ahead, so the horizon is the middle row.
+
+    Returns (error, coherence). error: lane centre minus image centre, in image half-widths at row REF_DY
+    (+ = lane centre to the right); it lives in [-0.5, 0.5) lane widths, so it wraps when the car leaves
+    its lane. coherence in [0, 1] tells how well the lines agree with the grid (low = do not trust).
+    (None, 0) when there are too few marking pixels.
     """
     height, width = tags.shape
     cx, horizon = width / 2.0, height / 2.0
-    centers, ks = [], []
-    for y in range(int(rows[0] * height), int(rows[1] * height), 2):
-        dy = y - horizon
-        if dy <= 0:
-            continue
-        xs = np.flatnonzero(tags[y] == line_tag)
-        left, right = xs[xs < cx], xs[xs >= cx]
-        if left.size and right.size:
-            centers.append((left.max() + right.min()) / 2.0)
-            ks.append((right.min() - left.max()) / dy)
-        elif lane_k and left.size:             # dashed marking on the other side
-            centers.append(left.max() + lane_k * dy / 2.0)
-        elif lane_k and right.size:
-            centers.append(right.min() - lane_k * dy / 2.0)
-    if not centers:
-        return None, lane_k
-    if ks:
-        k = float(np.median(ks))
-        lane_k = k if not lane_k else 0.8 * lane_k + 0.2 * k
-    return float((np.median(centers) - cx) / cx), lane_k
+    y0, y1 = int(rows[0] * height), int(rows[1] * height)
+    ys, xs = np.nonzero(tags[y0:y1] == line_tag)
+    if ys.size < 5:
+        return None, 0.0
+    dy = ys + y0 - horizon
+    angle = 2.0 * np.pi * (xs + 0.5 - cx) / (lane_k * dy)
+    c, s = np.cos(angle).mean(), np.sin(angle).mean()
+    coherence = float(np.hypot(c, s))
+    line_phase = np.arctan2(s, c) / (2.0 * np.pi)            # where the lines are, in lane widths
+    centre = (line_phase + 1.0) % 1.0 - 0.5                  # the lane centre is half a lane away from a line
+    return float(centre * lane_k * REF_DY / cx), coherence
 
 
 def steering_law(error, d_error, kp, kd, max_steer):
@@ -88,7 +89,6 @@ class LaneKeepingNode(object):
         self._t0 = None
         self._last_t = None
         self._last_error = 0.0
-        self._lane_k = None
         self._ref_lane = None            # (road_id, lane_id) of the lane the car started in
         self._rows = []                  # (t, error, steer, speed_kmh, lateral_m, off_lane)
         self._finished = False
@@ -149,8 +149,8 @@ class LaneKeepingNode(object):
         if self._dump_dir and (self._last_dump is None or t - self._last_dump >= 2.0):   # for debugging the estimator
             self._last_dump = t
             image.save_to_disk(os.path.join(self._dump_dir, "seg_%05.2f.png" % t), carla.ColorConverter.CityScapesPalette)
-        error, self._lane_k = lane_center_error(tags, self._lane_k)
-        if error is None:                      # no marking visible: keep the last estimate
+        error, coherence = lane_center_error(tags)
+        if error is None or coherence < MIN_COHERENCE:   # nothing reliable in this frame: keep the last estimate
             error = self._last_error
         else:
             error -= self._bias
