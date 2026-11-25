@@ -5,7 +5,8 @@
 #   2. RUNS: for each camera yaw, with the defence off and with the defence on ("compensate"), same car/map/spawn.
 #   3. Table and plot (analyze_hood_defense.py).
 #
-#   ./run_hood_defense.sh                         # probe + yaws 0 5 7 10, defence off and on
+#   ./run_hood_defense.sh                         # probe + yaws -20 -10 0 10 20, defence off and on
+#   (a negative yaw turns the camera to the left: the hood moves to the right, the direction the paper's rule flags)
 #   ./run_hood_defense.sh --probe-only            # only step 1 (to look at the images in <out>/probe_*/)
 #   ./run_hood_defense.sh --camera-x 0.6 --yaws "7"   # skip the probe search and use this camera position
 #
@@ -13,7 +14,7 @@
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-YAWS="0 5 7 10"; DEFENSES="off compensate"; RUN_SECONDS=15; SPAWN=124; MAP=Town04
+YAWS="-20 -10 0 10 20"; DEFENSES="off compensate"; RUN_SECONDS=15; SPAWN=124; MAP=Town04
 CANDIDATES="0.6 0.9 0.3 1.2"; CAMERA_X=""; PROBE_ONLY=0; REPEATS=1
 OUT="hood_defense_$(date +%Y%m%d_%H%M)"
 MIN_HOOD_PX=800
@@ -45,9 +46,9 @@ cleanup() { kill "${KEEPALIVE}" 2>/dev/null; ./2_down_environment.sh >/dev/null 
 trap cleanup EXIT
 trap 'echo; echo "Interrupted."; exit 130' INT TERM
 
-# run_one <dir> <name> <yaw> <defense> <camera_x> <hood_ref> <run_seconds> [dump_dir]
+# run_one <dir> <name> <yaw> <defense> <camera_x> <hood_ref> <hood_b_ref> <run_seconds> [dump_dir]
 run_one() {
-    local dir="$1" name="$2" yaw="$3" defense="$4" camx="$5" ref="$6" secs="$7" dump="${8:-}"
+    local dir="$1" name="$2" yaw="$3" defense="$4" camx="$5" ref="$6" bref="$7" secs="$8" dump="${9:-}"
     mkdir -p "${dir}"
     local csv="${dir}/${name}.csv" log="${dir}/${name}.log"
     rm -f "${csv}"
@@ -57,7 +58,7 @@ run_one() {
     echo -n "[$(date +%H:%M:%S)] ${dir}/${name} (yaw ${yaw}, defence ${defense}, camera x ${camx}) ... "
     LK_DUMP="${dump}" NO_PROMPT=1 ./1_up_environment.sh --map "${MAP}" --lane-keeping drive --spawn-index "${SPAWN}" \
         --run-seconds "${secs}" --psa-yaw "${yaw}" --log-csv "${csv}" --camera-x "${camx}" --defense "${defense}" \
-        --hood-ref "${ref}" > "${log}" 2>&1
+        --hood-ref "${ref}" --hood-b-ref "${bref}" > "${log}" 2>&1
     local waited=0 limit=$((secs * 25 + 120))
     until grep -q "\[LK\] summary" "${log}" 2>/dev/null; do
         sleep 2; waited=$((waited + 2))
@@ -71,17 +72,23 @@ run_one() {
     return 0
 }
 
+# b of the paper's hood fit measured in a probe log (the paper's own benign value if the hood edge was not found)
+edge_b() {
+    local l; l=$(grep -a "hood edge:" "$1" | head -1)
+    if [[ "${l}" =~ b=([-+0-9.]+) ]]; then echo "${BASH_REMATCH[1]}"; else echo "-0.0154"; fi
+}
+
 # ---------------------------------------------------------------- 1. probe
-HOOD_REF=0
+HOOD_REF=0; HOOD_B=-0.0154
 if [[ -z "${CAMERA_X}" ]]; then
     echo "== Step 1: looking for a camera position where the hood is visible"
     for x in ${CANDIDATES}; do
-        run_one "${OUT}" "probe_x${x}" 0 detect "${x}" 0 2 "${OUT}/probe_x${x}" || continue
+        run_one "${OUT}" "probe_x${x}" 0 detect "${x}" 0 -0.0154 2 "${OUT}/probe_x${x}" || continue
         line=$(grep -a "hood visible" "${OUT}/probe_x${x}.log" | head -1)
         if [[ "${line}" =~ hood\ visible\ \(([0-9]+)\ px,\ ([-+0-9.]+)\ px ]]; then
             npx="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[2]}"
             echo "   camera x ${x}: hood visible, ${npx} px, ${ref} px from the centre"
-            if [[ ${npx} -ge ${MIN_HOOD_PX} ]]; then CAMERA_X="${x}"; HOOD_REF="${ref}"; break; fi
+            if [[ ${npx} -ge ${MIN_HOOD_PX} ]]; then CAMERA_X="${x}"; HOOD_REF="${ref}"; HOOD_B=$(edge_b "${OUT}/probe_x${x}.log"); break; fi
         else
             echo "   camera x ${x}: $(grep -a 'bottom of the image' "${OUT}/probe_x${x}.log" | head -1)"
         fi
@@ -93,13 +100,13 @@ if [[ -z "${CAMERA_X}" ]]; then
     fi
 else
     # camera position given: still measure the reference on a run without attack
-    run_one "${OUT}" "probe_x${CAMERA_X}" 0 detect "${CAMERA_X}" 0 2 "${OUT}/probe_x${CAMERA_X}" || exit 2
+    run_one "${OUT}" "probe_x${CAMERA_X}" 0 detect "${CAMERA_X}" 0 -0.0154 2 "${OUT}/probe_x${CAMERA_X}" || exit 2
     line=$(grep -a "hood visible" "${OUT}/probe_x${CAMERA_X}.log" | head -1)
-    if [[ "${line}" =~ hood\ visible\ \(([0-9]+)\ px,\ ([-+0-9.]+)\ px ]]; then HOOD_REF="${BASH_REMATCH[2]}"
+    if [[ "${line}" =~ hood\ visible\ \(([0-9]+)\ px,\ ([-+0-9.]+)\ px ]]; then HOOD_REF="${BASH_REMATCH[2]}"; HOOD_B=$(edge_b "${OUT}/probe_x${CAMERA_X}.log")
     else echo "The hood is not visible with camera x ${CAMERA_X}."; exit 2; fi
 fi
-echo "== Camera x = ${CAMERA_X}, hood reference = ${HOOD_REF} px"
-echo "${CAMERA_X} ${HOOD_REF}" > "${OUT}/camera_and_reference.txt"
+echo "== Camera x = ${CAMERA_X}, hood reference = ${HOOD_REF} px, paper coefficient b (benign) = ${HOOD_B}"
+echo "${CAMERA_X} ${HOOD_REF} ${HOOD_B}" > "${OUT}/camera_and_reference.txt"
 [[ ${PROBE_ONLY} -eq 1 ]] && { echo "Probe only: done. Images in ${OUT}/probe_x${CAMERA_X}/"; exit 0; }
 
 # ---------------------------------------------------------------- 2. runs
@@ -107,9 +114,10 @@ echo "== Step 2: yaws [${YAWS}] x defences [${DEFENSES}] x ${REPEATS} repeat(s)"
 for rep in $(seq 1 "${REPEATS}"); do
     for yaw in ${YAWS}; do
         for defense in ${DEFENSES}; do
-            name=$(printf 'yaw%02d_r%d' "${yaw}" "${rep}")
-            run_one "${OUT}/${defense}" "${name}" "${yaw}" "${defense}" "${CAMERA_X}" "${HOOD_REF}" "${RUN_SECONDS}" \
-                || run_one "${OUT}/${defense}" "${name}" "${yaw}" "${defense}" "${CAMERA_X}" "${HOOD_REF}" "${RUN_SECONDS}" \
+            ayaw=${yaw#-}; sign=""; [[ "${yaw}" == -* ]] && sign="m"       # file names: yawm10_r1 = -10 degrees
+            name=$(printf 'yaw%s%02d_r%d' "${sign}" "${ayaw}" "${rep}")
+            run_one "${OUT}/${defense}" "${name}" "${yaw}" "${defense}" "${CAMERA_X}" "${HOOD_REF}" "${HOOD_B}" "${RUN_SECONDS}" \
+                || run_one "${OUT}/${defense}" "${name}" "${yaw}" "${defense}" "${CAMERA_X}" "${HOOD_REF}" "${HOOD_B}" "${RUN_SECONDS}" \
                 || echo "  giving up on ${defense} yaw ${yaw}"
         done
     done

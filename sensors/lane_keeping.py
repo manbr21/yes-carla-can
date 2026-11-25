@@ -30,6 +30,14 @@ HOOD_ROWS = (0.80, 1.0)   # the hood shows up in the bottom of the image
 MIN_HOOD_PIXELS = 150
 HOOD_TOL_PX = 8.0    # hood moved more than this from the image centre: the camera is not where it was mounted
 ALARM_FRAMES = 5     # ... for this many frames in a row (0.25 s)
+# Camera defence of the paper (PSA/Defense/Camera/engineHood_Detection.py): take the top edge of the car body in the segmentation,
+# keep the points between 70% and 95% of the image height, fit y = a*x^2 + b*x + c and flag the image when b < -0.15.
+# On their benign example b = -0.0154, so the threshold is 0.1346 below the benign value: it is applied relative to
+# the benign b measured on our own camera (--hood-b-ref); with the default reference it is the paper's absolute -0.15.
+PAPER_B_THRESHOLD = -0.15
+PAPER_B_BASELINE = -0.0154
+HOOD_EDGE_ROWS = (0.70, 0.95)
+MIN_EDGE_POINTS = 30
 MIN_COHERENCE = 0.25   # below this the frame is ignored (the last estimate is kept); under a PSA the grid is distorted and coherence drops to ~0.3-0.5
 
 
@@ -78,6 +86,31 @@ def hood_shift(tags, hood_tags=HOOD_TAGS, rows=HOOD_ROWS, min_pixels=MIN_HOOD_PI
     return float(xs.mean() + 0.5 - width / 2.0), int(xs.size)
 
 
+def hood_edge_fit(tags, car_tags=HOOD_TAGS, rows=HOOD_EDGE_ROWS, min_points=MIN_EDGE_POINTS):
+    """The paper's hood feature: quadratic fit y = a*x^2 + b*x + c of the top edge of the car body.
+
+    For every column, starting at the bottom, find the first car pixel and walk up to the first pixel that is not car: that is the
+    edge. Returns (a, b, c, number of points) or None when the hood edge is not visible.
+    """
+    mask = np.isin(tags, car_tags)
+    height, width = mask.shape
+    xs, ys = [], []
+    for x in range(width):
+        idx = np.flatnonzero(mask[:, x])
+        if not idx.size:
+            continue
+        last = idx[-1]
+        run = mask[:last + 1, x][::-1]
+        top = last - (run.size if run.all() else int(np.argmin(run))) + 1
+        if rows[0] * height < top <= rows[1] * height:
+            xs.append(x)
+            ys.append(top)
+    if len(xs) < min_points:
+        return None
+    a, b, c = np.polyfit(xs, ys, 2)
+    return float(a), float(b), float(c), len(xs)
+
+
 def steering_law(error, d_error, kp, kd, max_steer):
     """PD controller. CARLA steer: positive turns right, range [-1, 1]."""
     return float(np.clip(kp * error + kd * d_error, -max_steer, max_steer))
@@ -90,7 +123,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -102,6 +135,9 @@ class LaneKeepingNode(object):
         self._dump_dir, self._last_dump = dump_dir, None
         if dump_dir:
             os.makedirs(dump_dir, exist_ok=True)
+        self._hood_b_ref = hood_b_ref    # benign value of the paper's linear coefficient on this camera
+        self._paper_count = 0
+        self._paper_alarm_t = None
         self._hood_ref = hood_ref        # where the hood sits when nothing is wrong (measured on a run without attack)
         self.defense = defense           # "off", "detect" (log + alarm), "stop" (alarm + brake), "compensate" (undo the shift)
         self._hood_ema = None
@@ -119,10 +155,12 @@ class LaneKeepingNode(object):
         self._finished = False
         self._reported_first = False
         self._reported_hood = False
+        self._reported_edge = False
         self._log = open(log_path, "w", newline="") if log_path else None
         self._writer = csv.writer(self._log) if self._log else None
         if self._writer:
-            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane", "coherence", "hood_shift_px", "alarm"])
+            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane", "coherence", "hood_shift_px", "alarm",
+                                  "hood_a", "hood_b", "alarm_paper"])
 
         # Same mount as the RGB camera (front of the car), plus the PSA yaw.
         bound_x = 0.5 + parent_actor.bounding_box.extent.x
@@ -198,6 +236,17 @@ class LaneKeepingNode(object):
             self._hood_ema = hood if self._hood_ema is None else 0.8 * self._hood_ema + 0.2 * hood
             self._alarm_count = self._alarm_count + 1 if abs(self._hood_ema) > HOOD_TOL_PX else 0
         alarm = self._alarm_count >= ALARM_FRAMES
+        fit = hood_edge_fit(tags)
+        if fit is not None:
+            if not self._reported_edge:
+                self._reported_edge = True
+                print(f"[LK] hood edge: {fit[3]} points, a={fit[0]:.3e}, b={fit[1]:.4f} "
+                      f"(paper rule: alarm if b < {self._hood_b_ref + PAPER_B_THRESHOLD - PAPER_B_BASELINE:.4f})")
+            flagged = fit[1] - self._hood_b_ref < PAPER_B_THRESHOLD - PAPER_B_BASELINE
+            self._paper_count = self._paper_count + 1 if flagged else 0
+        paper_alarm = self._paper_count >= ALARM_FRAMES
+        if paper_alarm and self._paper_alarm_t is None:
+            self._paper_alarm_t = t
         if alarm and self._alarm_t is None:
             self._alarm_t = t
             if self.defense != "off":
@@ -235,7 +284,8 @@ class LaneKeepingNode(object):
 
         lateral, off_lane = self._lateral_offset()
         row = (t, error, steer, speed * 3.6, lateral, int(off_lane), coherence,
-               hood if hood is not None else float("nan"), int(alarm))
+               hood if hood is not None else float("nan"), int(alarm),
+               fit[0] if fit else float("nan"), fit[1] if fit else float("nan"), int(paper_alarm))
         self._rows.append(row)
         if self._writer:
             self._writer.writerow([f"{x:.3f}" if isinstance(x, float) else x for x in row])
@@ -262,6 +312,10 @@ class LaneKeepingNode(object):
         print("[LK] summary: %.0f s, max |lateral| %.2f m, off-lane %.0f%% of the time, first off-lane at %s"
               % (data[-1, 0] - data[0, 0], np.abs(lateral).max(), 100 * off.mean(),
                  ("%.1f s" % first_off[0]) if first_off.size else "never"))
+        if self._hood_ema is not None:
+            print("[LK] hood detectors: centroid rule alarm %s; paper rule alarm %s" % (
+                ("at %.1f s" % self._alarm_t) if self._alarm_t is not None else "never",
+                ("at %.1f s" % self._paper_alarm_t) if self._paper_alarm_t is not None else "never"))
         if self.defense != "off":
             print("[LK] defence '%s': alarm %s" % (self.defense, ("at %.1f s" % self._alarm_t) if self._alarm_t is not None else "never raised"))
 

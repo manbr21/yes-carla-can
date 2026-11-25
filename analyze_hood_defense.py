@@ -26,9 +26,10 @@ def load(path):
 def collect(folder):
     out = {}
     for path in sorted(glob.glob(os.path.join(folder, "yaw*_r*.csv"))):
-        m = re.search(r"yaw(\d+)_r(\d+)", path)
+        m = re.search(r"yaw(m?)(\d+)_r(\d+)", path)
         if m and os.path.getsize(path) > 100:
-            out.setdefault(int(m.group(1)), []).append(load(path))
+            yaw = int(m.group(2)) * (-1 if m.group(1) else 1)
+            out.setdefault(yaw, []).append(load(path))
     return out
 
 
@@ -47,21 +48,27 @@ def main():
         print("no runs found in", folder)
         return
     yaws = sorted(set(off) | set(on))
-    print("%-5s %14s %14s %12s %14s %16s" % ("yaw", "sem defesa (m)", "com defesa (m)", "alarme", "capô medido", "capô previsto"))
+    print("%-5s %14s %14s %10s %10s %10s %14s %14s" % ("yaw", "sem defesa (m)", "com defesa (m)", "alarme", "alarme", "b (artigo)", "capô medido", "capô previsto"))
+    print("%-5s %14s %14s %10s %10s %10s" % ("", "", "", "(centroide)", "(artigo)", ""))
     rows = []
     for yaw in yaws:
         a = steady(off[yaw]) if yaw in off else float("nan")
         b = steady(on[yaw]) if yaw in on else float("nan")
-        alarm, hood = "-", float("nan")
+        alarm, alarm_p, hood, bmean = "-", "-", float("nan"), float("nan")
         src = (off.get(yaw) or on.get(yaw))[0][0]
         if "alarm" in src.dtype.names:
             if (src["alarm"] > 0).any():
                 alarm = "%.1f s" % src["t_s"][src["alarm"] > 0][0]
             s = src["t_s"] >= 5
             hood = float(np.nanmean(src["hood_shift_px"][s]))
+        if "alarm_paper" in src.dtype.names:
+            if (src["alarm_paper"] > 0).any():
+                alarm_p = "%.1f s" % src["t_s"][src["alarm_paper"] > 0][0]
+            s = src["t_s"] >= 5
+            bmean = float(np.nanmean(src["hood_b"][s]))
         pred = -FOCAL_PX * np.tan(np.radians(yaw))
         rows.append((yaw, a, b, hood, pred))
-        print("%-5d %+14.2f %+14.2f %12s %+11.1f px %+13.1f px" % (yaw, a, b, alarm, hood, pred))
+        print("%-5d %+14.2f %+14.2f %10s %10s %+10.4f %+11.1f px %+11.1f px" % (yaw, a, b, alarm, alarm_p, bmean, hood, pred))
 
     try:
         import matplotlib

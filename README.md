@@ -721,3 +721,7 @@ This is an adaptation of the camera defence of the paper (which fits a curve to 
 `./run_hood_defense.sh` runs the whole hood defence experiment: it looks for a camera position where the hood is visible (and measures where it sits
 without attack), then runs each yaw with the defence off and on, and plots the result with `analyze_hood_defense.py`. `--probe-only` stops after the
 first step so the images can be inspected.
+
+The hood checks log two detectors in every run: the **centroid** rule (own adaptation: where the hood sits in the image) and the **paper** rule
+(`hood_edge_fit`: quadratic fit of the hood edge, alarm when the linear coefficient b is more than 0.1346 below the benign value, as in
+`PSA/Defense/Camera/engineHood_Detection.py`; the paper only flags a shift of the hood to the right, so negative yaws are needed to test it).

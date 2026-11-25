@@ -189,3 +189,45 @@ def test_hood_reference_is_subtracted():
     node.defense, node._hood_ref = "detect", -30.0                    # the hood naturally sits 30 px to the left
     _frames(node, with_hood(tags_lane(), -30))
     assert node._alarm_t is None                                       # ... so this is not a shift
+
+
+# ---------------------------------------------------------------- the paper's hood feature (quadratic fit of the hood edge)
+def arch_hood(shift=0, curvature=4e-4):
+    """Hood whose top edge is an arch (y grows down: edges lower than the middle), apex at the image centre + shift."""
+    tags = np.zeros((H, W), dtype=np.uint8)
+    for x in range(W):
+        top = int(0.78 * H + curvature * (x - W / 2 - shift) ** 2)
+        tags[min(top, H - 1):, x] = 14
+    return tags
+
+
+def test_hood_edge_fit_recovers_the_arch():
+    a, b, c, n = lk.hood_edge_fit(arch_hood(0))
+    assert a == pytest.approx(4e-4, rel=0.1) and n > 400
+    assert b == pytest.approx(-2 * 4e-4 * W / 2, rel=0.1)             # apex at the centre: b = -2 a x_apex
+
+
+def test_hood_edge_shift_moves_the_linear_coefficient_in_the_papers_direction():
+    b_right = lk.hood_edge_fit(arch_hood(+40))[1]
+    b_centre = lk.hood_edge_fit(arch_hood(0))[1]
+    b_left = lk.hood_edge_fit(arch_hood(-40))[1]
+    assert b_right < b_centre < b_left                                 # the paper flags b < threshold: a shift to the right
+
+
+def test_hood_edge_fit_none_without_a_hood():
+    assert lk.hood_edge_fit(tags_lane()) is None
+
+
+def test_paper_rule_alarm_relative_to_the_benign_coefficient():
+    benign_b = lk.hood_edge_fit(arch_hood(0, 1.5e-3))[1]
+    right, left = [], []
+    for shift, store in ((+150, right), (-150, left)):
+        node, _ = _node()
+        node._hood_b_ref = benign_b
+        _frames(node, with_hood_arch(shift), n=12)
+        store.append(node._paper_alarm_t)
+    assert right[0] is not None and left[0] is None                    # only a shift to the right is flagged, as in the paper
+
+
+def with_hood_arch(shift):
+    return np.maximum(arch_hood(shift, 1.5e-3), tags_lane())
