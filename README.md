@@ -709,3 +709,11 @@ SOFTWARE.
 same car, map and spawn point (no receiver, no video). It writes one CSV per run to `psa_sweep_<date>/` and then calls
 `python analyze_psa_sweep.py <folder>`, which prints a table and saves `sweep.png`. Options: `--yaws "5 7 10"`, `--repeats N`, `--run-seconds S`.
 `plot_psa_results.py` plots specific CSV files. The result folders are not versioned.
+
+#### Hood defence (optional)
+
+The default camera sits in front of the car and never sees the hood. With `--camera-x 0.6` (or `CAMERA_X=0.6`) it sits inside the cabin and the hood
+shows up at the bottom of the image. The hood belongs to the car, so it should always be centred; if the image is shifted (a film in front of the lens,
+or `--psa-yaw`), the hood moves with it. `--defense detect` logs an alarm, `--defense stop` also brakes, `--defense compensate` removes the shift
+measured on the hood from the lane estimate. Result CSVs get two more columns: `hood_shift_px` and `alarm`.
+This is an adaptation of the camera defence of the paper (which fits a curve to the hood outline), not the same method.

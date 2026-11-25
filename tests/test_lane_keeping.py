@@ -114,3 +114,71 @@ def test_run_ends_with_brake():
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 4.0))
     lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 8.0))   # past warm-up (3 s) + run (2 s)
     can.send_brake_msg.assert_called_once()
+
+
+# ---------------------------------------------------------------- hood defence
+def with_hood(tags, shift=0):
+    """Add the ego car hood (tag 14) at the bottom of the image, centred on the image centre + shift."""
+    tags = tags.copy()
+    tags[int(0.8 * H):, W // 2 - 110 + shift:W // 2 + 110 + shift] = 14
+    return tags
+
+
+def test_hood_shift_measures_how_far_the_hood_moved():
+    shift, n = lk.hood_shift(with_hood(tags_lane(), 0))
+    assert shift == pytest.approx(0.0, abs=1.0) and n > 150
+    shift, _ = lk.hood_shift(with_hood(tags_lane(), -30))
+    assert shift == pytest.approx(-30.0, abs=1.0)
+
+
+def test_hood_not_visible_gives_none():
+    shift, n = lk.hood_shift(tags_lane())
+    assert shift is None and n == 0
+
+
+def test_compensation_removes_the_shift_from_the_lane_error():
+    attacked = tags_lane(shift=-20)                                  # the whole scene moved 20 px
+    plain, _ = lk.lane_center_error(attacked)
+    fixed, _ = lk.lane_center_error(attacked, shift_px=-20.0)         # the hood moved by the same amount
+    assert plain < -0.05
+    assert fixed == pytest.approx(0.0, abs=0.02)
+
+
+def _frames(node, tags, n=12, t0=4.0):
+    lk.LaneKeepingNode._on_image(lambda: node, _image(tags, 0.0))
+    for i in range(n):
+        lk.LaneKeepingNode._on_image(lambda: node, _image(tags, t0 + 0.05 * i))
+
+
+def test_alarm_when_the_hood_moves(capsys):
+    node, can = _node()
+    node.defense = "detect"
+    _frames(node, with_hood(tags_lane(shift=-30), -30))
+    assert node._alarm_t is not None
+    assert "DEFENCE ALARM" in capsys.readouterr().out
+    assert can.send_steer_msg.called                                 # "detect" only warns, the car keeps being driven
+
+
+def test_no_alarm_when_the_hood_is_where_it_should_be():
+    node, _ = _node()
+    node.defense = "detect"
+    _frames(node, with_hood(tags_lane()))
+    assert node._alarm_t is None
+
+
+def test_stop_defence_brakes():
+    node, can = _node()
+    node.defense = "stop"
+    _frames(node, with_hood(tags_lane(shift=-30), -30))
+    can.send_brake_msg.assert_called_once()
+
+
+def test_compensate_defence_steers_straight_under_attack():
+    attacked = with_hood(tags_lane(shift=-20), -20)
+    off, _ = _node()
+    off.defense, off._lane_k = "off", K                               # the synthetic lines use the default k, not the mock car's
+    _frames(off, attacked, n=30)
+    on, _ = _node()
+    on.defense, on._lane_k = "compensate", K
+    _frames(on, attacked, n=30)
+    assert abs(on._rows[-1][1]) < 0.02 < abs(off._rows[-1][1])        # perceived error: ~0 with the defence, clearly off without

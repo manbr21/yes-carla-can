@@ -9,6 +9,8 @@ MAP="${MAP:-}"
 PSA_YAW="${PSA_YAW:-0}"
 LANE_KEEPING="${LANE_KEEPING:-off}"
 SPAWN_INDEX="${SPAWN_INDEX:-}"
+CAMERA_X="${CAMERA_X:-}"     # lane keeping camera x (m from the car centre); 0.6 shows the hood
+DEFENSE="${DEFENSE:-off}"    # hood defence: off | detect | stop | compensate
 NO_PROMPT="${NO_PROMPT:-}"   # set (e.g. NO_PROMPT=1) to skip the "start the receiver" prompt (automated runs, no video)
 VEHICLE="${VEHICLE:-}"       # blueprint id, e.g. vehicle.tesla.model3 (default: random; model3 when lane keeping is on)
 RUN_SECONDS="${RUN_SECONDS:-0}"
@@ -69,6 +71,8 @@ while [[ $# -gt 0 ]]; do
         --psa-yaw) PSA_YAW="$2"; shift 2 ;;
         --spawn-index) SPAWN_INDEX="$2"; shift 2 ;;
         --vehicle) VEHICLE="$2"; shift 2 ;;
+        --camera-x) CAMERA_X="$2"; shift 2 ;;
+        --defense) DEFENSE="$2"; shift 2 ;;
         --run-seconds) RUN_SECONDS="$2"; shift 2 ;;
         --log-csv) LOG_CSV="$2"; shift 2 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
@@ -150,6 +154,8 @@ CLIENT_ARGS+=(--lane-keeping "${LANE_KEEPING}" --psa-yaw "${PSA_YAW}" --run-seco
 # lane keeping runs must always use the same one to be comparable.
 if [[ -z "${VEHICLE}" && "${LANE_KEEPING}" != "off" ]]; then VEHICLE="vehicle.tesla.model3"; fi
 [[ -n "${VEHICLE}" ]] && CLIENT_ARGS+=(--filter "${VEHICLE}")
+[[ -n "${CAMERA_X}" ]] && CLIENT_ARGS+=(--camera-x "${CAMERA_X}")
+CLIENT_ARGS+=(--defense "${DEFENSE}")
 [[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
 [[ -n "${LK_DUMP}" ]] && CLIENT_ARGS+=(--lk-dump "${LK_DUMP}")
 [[ -n "${LK_BIAS}" ]] && CLIENT_ARGS+=(--lk-bias "${LK_BIAS}")

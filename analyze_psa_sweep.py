@@ -35,16 +35,19 @@ def main():
         print("no runs found in", folder)
         return
 
-    print("%-5s %-4s %12s %12s %10s %9s %8s" % ("yaw", "rep", "desvio (m)", "max |lat| (m)", "erro visto", "fora faixa", "km/h"))
+    print("%-5s %-4s %12s %12s %10s %9s %8s %9s" % ("yaw", "rep", "desvio (m)", "max |lat| (m)", "erro visto", "fora faixa", "km/h", "alarme"))
     steady = {}
     for (yaw, rep), (d, lat) in sorted(runs.items()):
         t = d["t_s"]
         s = (t >= SETTLE[0]) & (t <= SETTLE[1])
         ss = float(lat[s].mean()) if s.any() else float("nan")
         steady.setdefault(yaw, []).append(ss)
-        print("%-5d %-4d %+12.2f %12.2f %+10.3f %9.0f%% %8.1f" % (
+        alarm = "-"
+        if "alarm" in d.dtype.names and (d["alarm"] > 0).any():
+            alarm = "%.1f s" % t[d["alarm"] > 0][0]
+        print("%-5d %-4d %+12.2f %12.2f %+10.3f %9.0f%% %8.1f %9s" % (
             yaw, rep, ss, np.abs(lat).max(), d["perceived_error"][s].mean() if s.any() else float("nan"),
-            100 * d["off_lane"].mean(), d["speed_kmh"][s].mean() if s.any() else float("nan")))
+            100 * d["off_lane"].mean(), d["speed_kmh"][s].mean() if s.any() else float("nan"), alarm))
 
     print("\nPor yaw (média e variação entre as repetições, desvio em m, negativo = esquerda):")
     base = np.mean(steady[0]) if 0 in steady else 0.0

@@ -25,10 +25,15 @@ ROAD_LINE_TAG = 24   # semantic label of road markings in CARLA 0.9.15 (CityScap
 
 LANE_K = 2.2        # lane width in pixels per image row below the horizon (measured on Town04 highway frames)
 REF_DY = 35.0       # image row (pixels below the horizon) where the returned error is expressed
+HOOD_TAGS = (14,)    # semantic label of the ego car body (CARLA 0.9.15: 14 = Car)
+HOOD_ROWS = (0.80, 1.0)   # the hood shows up in the bottom of the image
+MIN_HOOD_PIXELS = 150
+HOOD_TOL_PX = 8.0    # hood moved more than this from the image centre: the camera is not where it was mounted
+ALARM_FRAMES = 5     # ... for this many frames in a row (0.25 s)
 MIN_COHERENCE = 0.25   # below this the frame is ignored (the last estimate is kept); under a PSA the grid is distorted and coherence drops to ~0.3-0.5
 
 
-def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE_TAG):
+def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE_TAG, shift_px=0.0):
     """Estimate where the centre of the nearest lane is, relative to the image centre.
 
     The road has several lanes and the markings are dashed, so in a given frame only a few lines are
@@ -41,7 +46,7 @@ def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE
     Returns (error, coherence). error: lane centre minus image centre, in image half-widths at row REF_DY
     (+ = lane centre to the right); it lives in [-0.5, 0.5) lane widths, so it wraps when the car leaves
     its lane. coherence in [0, 1] tells how well the lines agree with the grid (low = do not trust).
-    (None, 0) when there are too few marking pixels.
+    (None, 0) when there are too few marking pixels. shift_px: image shift to remove (see hood_shift).
     """
     height, width = tags.shape
     cx, horizon = width / 2.0, height / 2.0
@@ -50,12 +55,27 @@ def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE
     if ys.size < 5:
         return None, 0.0
     dy = ys + y0 - horizon
-    angle = 2.0 * np.pi * (xs + 0.5 - cx) / (lane_k * dy)
+    angle = 2.0 * np.pi * (xs + 0.5 - cx - shift_px) / (lane_k * dy)
     c, s = np.cos(angle).mean(), np.sin(angle).mean()
     coherence = float(np.hypot(c, s))
     line_phase = np.arctan2(s, c) / (2.0 * np.pi)            # where the lines are, in lane widths
     centre = (line_phase + 1.0) % 1.0 - 0.5                  # the lane centre is half a lane away from a line
     return float(centre * lane_k * REF_DY / cx), coherence
+
+
+def hood_shift(tags, hood_tags=HOOD_TAGS, rows=HOOD_ROWS, min_pixels=MIN_HOOD_PIXELS):
+    """How far (pixels, + = to the right) the ego car body is from the image centre; None if it is not visible.
+
+    The hood is part of the car, so a camera mounted in the middle of the car always sees it centred. If a film
+    (or anything else) shifts the view, the hood moves in the image by about the same amount as the whole scene.
+    That makes the hood a free reference: it tells how much the image was shifted.
+    """
+    height, width = tags.shape
+    sub = tags[int(rows[0] * height):int(rows[1] * height)]
+    _, xs = np.nonzero(np.isin(sub, hood_tags))
+    if xs.size < min_pixels:
+        return None, int(xs.size)
+    return float(xs.mean() + 0.5 - width / 2.0), int(xs.size)
 
 
 def steering_law(error, d_error, kp, kd, max_steer):
@@ -70,7 +90,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off"):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -82,6 +102,10 @@ class LaneKeepingNode(object):
         self._dump_dir, self._last_dump = dump_dir, None
         if dump_dir:
             os.makedirs(dump_dir, exist_ok=True)
+        self.defense = defense           # "off", "detect" (log + alarm), "stop" (alarm + brake), "compensate" (undo the shift)
+        self._hood_ema = None
+        self._alarm_count = 0
+        self._alarm_t = None
         self._bias = bias                # calibration: error measured on the benign run at the start
 
         world = parent_actor.get_world()
@@ -93,10 +117,11 @@ class LaneKeepingNode(object):
         self._rows = []                  # (t, error, steer, speed_kmh, lateral_m, off_lane, coherence)
         self._finished = False
         self._reported_first = False
+        self._reported_hood = False
         self._log = open(log_path, "w", newline="") if log_path else None
         self._writer = csv.writer(self._log) if self._log else None
         if self._writer:
-            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane", "coherence"])
+            self._writer.writerow(["t_s", "perceived_error", "steer", "speed_kmh", "lateral_m", "off_lane", "coherence", "hood_shift_px", "alarm"])
 
         # Same mount as the RGB camera (front of the car), plus the PSA yaw.
         bound_x = 0.5 + parent_actor.bounding_box.extent.x
@@ -111,8 +136,11 @@ class LaneKeepingNode(object):
         bp.set_attribute("image_size_y", str(self.IMAGE_HEIGHT))
         bp.set_attribute("fov", str(self.FOV))
         bp.set_attribute("sensor_tick", "0.05")
+        # By default the camera is in front of the car (it never sees the hood). With camera_x (metres from the car
+        # centre, e.g. 0.6) it sits inside the cabin and the hood is visible, which the hood defence needs.
+        cam_x = bound_x + 0.3 if camera_x is None else camera_x
         transform = carla.Transform(
-            carla.Location(x=bound_x + 0.3, z=bound_z + 0.1),
+            carla.Location(x=cam_x, z=bound_z + 0.1),
             carla.Rotation(yaw=psa_yaw),
         )
         self.sensor = world.spawn_actor(bp, transform, attach_to=parent_actor,
@@ -120,6 +148,7 @@ class LaneKeepingNode(object):
         weak_self = weakref.ref(self)
         self.sensor.listen(lambda image: LaneKeepingNode._on_image(weak_self, image))
         print(f"[LK] lane keeping '{mode}' started (PSA yaw {psa_yaw:+.1f} deg, target {target_speed_kmh:.0f} km/h)")
+        print(f"[LK] camera x = {cam_x:.2f} m from the car centre, hood defence '{defense}'")
         print(f"[LK] vehicle {self._vehicle_id}, camera height {cam_height:.2f} m, lane width {lane_width:.2f} m -> k = {self._lane_k:.2f}")
 
     # ------------------------------------------------------------------ ground truth for the metrics
@@ -155,10 +184,30 @@ class LaneKeepingNode(object):
             print(f"[LK] first frame: best-fit k = {best_k:.2f} (coherence {best_coh:.2f}); k in use {self._lane_k:.2f}")
             print(f"[LK] first frame: {n_lines} road-marking pixels (tag {ROAD_LINE_TAG})"
                   + ("" if n_lines else " -> none found: check ROAD_LINE_TAG or the road/spawn point"))
+        hood, n_hood = hood_shift(tags)
+        if not self._reported_hood:
+            self._reported_hood = True
+            band = tags[int(HOOD_ROWS[0] * tags.shape[0]):]
+            labels, counts = np.unique(band, return_counts=True)
+            top = ", ".join("tag %d: %d px" % (l, c) for c, l in sorted(zip(counts, labels), reverse=True)[:3])
+            print(f"[LK] bottom of the image: {top}; hood {'visible' if hood is not None else 'NOT visible'}"
+                  + (f" ({n_hood} px, {hood:+.1f} px from the centre)" if hood is not None else ""))
+        if hood is not None:
+            self._hood_ema = hood if self._hood_ema is None else 0.8 * self._hood_ema + 0.2 * hood
+            self._alarm_count = self._alarm_count + 1 if abs(self._hood_ema) > HOOD_TOL_PX else 0
+        alarm = self._alarm_count >= ALARM_FRAMES
+        if alarm and self._alarm_t is None:
+            self._alarm_t = t
+            if self.defense != "off":
+                print(f"[LK] DEFENCE ALARM at {t:.1f} s: the hood is {self._hood_ema:+.1f} px from the image centre (camera shifted)")
+        if alarm and self.defense == "stop" and not self._finished:
+            self._stop()
+            return
+        shift = self._hood_ema if (self.defense == "compensate" and self._hood_ema is not None) else 0.0
         if self._dump_dir and (self._last_dump is None or t - self._last_dump >= 2.0):   # for debugging the estimator
             self._last_dump = t
             image.save_to_disk(os.path.join(self._dump_dir, "seg_%05.2f.png" % t), carla.ColorConverter.CityScapesPalette)
-        error, coherence = lane_center_error(tags, self._lane_k)
+        error, coherence = lane_center_error(tags, self._lane_k, shift_px=shift)
         if error is None or coherence < MIN_COHERENCE:   # nothing reliable in this frame: keep the last estimate
             error = self._last_error
         else:
@@ -183,7 +232,8 @@ class LaneKeepingNode(object):
             self._can.send_steer_msg(controls)
 
         lateral, off_lane = self._lateral_offset()
-        row = (t, error, steer, speed * 3.6, lateral, int(off_lane), coherence)
+        row = (t, error, steer, speed * 3.6, lateral, int(off_lane), coherence,
+               hood if hood is not None else float("nan"), int(alarm))
         self._rows.append(row)
         if self._writer:
             self._writer.writerow([f"{x:.3f}" if isinstance(x, float) else x for x in row])
@@ -210,6 +260,8 @@ class LaneKeepingNode(object):
         print("[LK] summary: %.0f s, max |lateral| %.2f m, off-lane %.0f%% of the time, first off-lane at %s"
               % (data[-1, 0] - data[0, 0], np.abs(lateral).max(), 100 * off.mean(),
                  ("%.1f s" % first_off[0]) if first_off.size else "never"))
+        if self.defense != "off":
+            print("[LK] defence '%s': alarm %s" % (self.defense, ("at %.1f s" % self._alarm_t) if self._alarm_t is not None else "never raised"))
 
     def destroy(self):
         if self.sensor is not None:
