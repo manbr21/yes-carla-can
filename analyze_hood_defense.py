@@ -94,17 +94,31 @@ def main():
         print("\n(matplotlib not installed: no plot)")
         return
     ink, muted, grid = "#0b0b0b", "#52514e", "#e3e2de"
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.6), facecolor="#fcfcfb")
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.5, 5.2), facecolor="#fcfcfb")
     ys = [r[0] for r in rows]
-    a1.plot(ys, [r[1] for r in rows], color="#2a78d6", linewidth=2, marker="o", label="sem defesa")
-    a1.plot(ys, [r[2] for r in rows], color="#eb6834", linewidth=2, marker="o", label="com defesa do capô")
+    half = LANE_WIDTH / 2
+    base = next((r[1] for r in rows if r[0] == 0), 0.0)
+    # Geometric model (see analyze_psa_sweep.py): the controller looks Z metres ahead, so a shift of the picture moves the car by
+    # Z*tan(angle); the lane estimator only sees the position modulo one lane width, so beyond half a lane it wraps around.
+    small = [r for r in rows if 0 < r[0] <= 10]
+    z_eff = np.mean([abs(r[1] - base) / np.tan(np.radians(r[0])) for r in small]) if small else None
+    if z_eff:
+        deg = np.linspace(min(ys) - 1, max(ys) + 1, 600)
+        wrapped = (-z_eff * np.tan(np.radians(deg)) + half) % LANE_WIDTH - half + base
+        wrapped[np.abs(np.diff(wrapped, prepend=wrapped[0])) > half] = np.nan
+        a1.plot(deg, wrapped, color=muted, linewidth=1.5, linestyle=(0, (1, 2)), zorder=1,
+                label="modelo: %.1f m x tan(ângulo), com volta de faixa" % z_eff)
+    a1.scatter(ys, [r[1] for r in rows], color="#2a78d6", s=48, zorder=3, label="sem defesa")
+    a1.plot(ys, [r[2] for r in rows], color="#eb6834", linewidth=2, marker="o", zorder=2, label="com defesa do capô")
     a1.axhline(0, color=muted, linewidth=0.8)
-    a1.axhline(-LANE_WIDTH / 2, color=muted, linestyle=(0, (4, 3)), linewidth=1)
-    a1.text(ys[-1], -LANE_WIDTH / 2 + 0.05, "limite da faixa", color=muted, fontsize=9, ha="right", va="bottom")
-    a1.set_xlabel("Giro da câmera (graus, 0 = sem ataque)", color=ink)
+    for edge in (-half, half):
+        a1.axhline(edge, color=muted, linestyle=(0, (4, 3)), linewidth=1)
+    a1.text(min(ys), half + 0.04, "limite da faixa", color=muted, fontsize=9, va="bottom")
+    a1.set_ylim(-2.1, 2.1)
+    a1.set_xlabel("Deslocamento da imagem (graus, 0 = sem ataque)", color=ink)
     a1.set_ylabel("Desvio lateral estável (m)\n(negativo = esquerda)", color=ink)
-    a1.set_title("A defesa devolve o carro ao centro?", loc="left", color=ink, fontweight="bold")
-    a1.legend(frameon=False, fontsize=10, loc="center left")
+    a1.set_title("A defesa devolve o carro ao centro", loc="left", color=ink, fontweight="bold")
+    a1.legend(frameon=False, fontsize=9, loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=3)
     a2.scatter([r[4] for r in rows], [r[3] for r in rows], color="#2a78d6", s=42, zorder=3)
     lim = max(abs(r[4]) for r in rows) * 1.1 + 1
     a2.plot([-lim, lim], [-lim, lim], color=muted, linestyle=(0, (1, 2)), linewidth=1.5, label="previsto: f x tan(ângulo)")
