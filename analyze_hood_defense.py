@@ -42,8 +42,13 @@ def steady(runs):
 
 
 def main():
-    folder = sys.argv[1] if len(sys.argv) > 1 else "."
-    off, on = collect(os.path.join(folder, "off")), collect(os.path.join(folder, "compensate"))
+    folders = sys.argv[1:] or ["."]            # several folders are merged: the same yaw in two folders = two executions
+    folder = folders[-1]                       # the plot is saved in the last one
+    off, on = {}, {}
+    for f in folders:
+        for dst, sub_dir in ((off, "off"), (on, "compensate")):
+            for yaw, runs in collect(os.path.join(f, sub_dir)).items():
+                dst.setdefault(yaw, []).extend(runs)
     if not off and not on:
         print("no runs found in", folder)
         return
@@ -71,6 +76,12 @@ def main():
         bs[yaw] = bmean
         extra.append((yaw, a, b, alarm, alarm_p, bmean, hood, pred))
 
+    repeated = [y for y in yaws if len(off.get(y, [])) > 1 or len(on.get(y, [])) > 1]
+    if repeated:
+        print("\nReprodutibilidade (desvio estável de cada execução, em m):")
+        for y in repeated:
+            fmt = lambda runs: ", ".join("%+.2f" % steady([r]) for r in runs) if runs else "-"
+            print("  yaw %3d: sem defesa [%s]   com defesa [%s]" % (y, fmt(off.get(y, [])), fmt(on.get(y, []))))
     b0 = bs.get(0, float("nan"))
     for yaw, a, b, alarm, alarm_p, bmean, hood, pred in extra:
         print("%-5d %+14.2f %+14.2f %11s %9s %+10.4f %+9.4f %+10.1f px %+10.1f px" % (yaw, a, b, alarm, alarm_p, bmean, bmean - b0, hood, pred))
