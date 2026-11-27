@@ -588,6 +588,36 @@ If the car oscillates or reacts too slowly, tune the controller with `LK_GAINS="
 > The node is a deliberately simple lane keeper (road markings plus a PD controller), not the lane-detection network used in the paper.
 > It shows the mechanism: a controller that assumes a fixed camera is misled by a shifted view.
 
+#### Running the whole experiment
+
+`./run_psa_sweep.sh` runs a baseline and several camera yaw offsets, each one repeated, restarting CARLA every time and always using the
+same car, map and spawn point (no receiver, no video). It writes one CSV per run to `psa_sweep_<date>/` and then calls
+`python analyze_psa_sweep.py <folder>`, which prints a table and saves `sweep.png`. Options: `--yaws "5 7 10"`, `--repeats N`, `--run-seconds S`.
+`plot_psa_results.py` plots specific CSV files. The result folders are not versioned.
+
+#### Hood defence (optional)
+
+The default camera sits in front of the car and never sees the hood. With `--camera-x 0.6` (or `CAMERA_X=0.6`) it sits inside the cabin and the hood
+shows up at the bottom of the image. The hood belongs to the car, so it should always be centred; if the image is shifted (a film in front of the lens,
+or `--psa-yaw`), the hood moves with it. `--defense detect` logs an alarm, `--defense stop` also brakes, `--defense compensate` removes the shift
+measured on the hood from the lane estimate. Result CSVs get two more columns: `hood_shift_px` and `alarm`.
+This is an adaptation of the camera defence of the paper (which fits a curve to the hood outline), not the same method.
+
+`./run_hood_defense.sh` runs the whole hood defence experiment: it looks for a camera position where the hood is visible (and measures where it sits
+without attack), then runs each yaw with the defence off and on, and plots the result with `analyze_hood_defense.py`. `--probe-only` stops after the
+first step so the images can be inspected.
+
+The hood checks log two detectors in every run: the **centroid** rule (own adaptation: where the hood sits in the image) and the **paper** rule
+(`hood_edge_fit`: quadratic fit of the hood edge, alarm when the linear coefficient b is more than 0.1346 below the benign value, as in
+`PSA/Defense/Camera/engineHood_Detection.py`; the paper only flags a shift of the hood to the right, so negative yaws are needed to test it).
+
+`--psa-mode` chooses how the attack is simulated. The default, `shift`, moves the whole picture, hood included, by `f*tan(yaw)` pixels, which is
+what a film in front of the lens does. `rotate` turns the camera inside the car instead (a misaligned camera); with the camera inside the cabin
+other parts of the car body then enter the picture, so it is not suitable for the hood defence. The first sweep of the project was made with `rotate`.
+
+The attack and the defence are each a small, self-contained module: `attacks/perspective_shift_attack.py` and
+`defense/hood_reference_defense.py`. See the README in each folder for how they work, independently of this CARLA client.
+
 # Advanced usage - Customizing network messages and periods
 
 The virtual CAN network is configured via a DBC file. You can change CAN IDs and transmission periods without touching any code, which is useful, for example, when evaluating how well a detection algorithm generalises to a different network configuration.
@@ -702,30 +732,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-#### Running the whole experiment
-
-`./run_psa_sweep.sh` runs a baseline and several camera yaw offsets, each one repeated, restarting CARLA every time and always using the
-same car, map and spawn point (no receiver, no video). It writes one CSV per run to `psa_sweep_<date>/` and then calls
-`python analyze_psa_sweep.py <folder>`, which prints a table and saves `sweep.png`. Options: `--yaws "5 7 10"`, `--repeats N`, `--run-seconds S`.
-`plot_psa_results.py` plots specific CSV files. The result folders are not versioned.
-
-#### Hood defence (optional)
-
-The default camera sits in front of the car and never sees the hood. With `--camera-x 0.6` (or `CAMERA_X=0.6`) it sits inside the cabin and the hood
-shows up at the bottom of the image. The hood belongs to the car, so it should always be centred; if the image is shifted (a film in front of the lens,
-or `--psa-yaw`), the hood moves with it. `--defense detect` logs an alarm, `--defense stop` also brakes, `--defense compensate` removes the shift
-measured on the hood from the lane estimate. Result CSVs get two more columns: `hood_shift_px` and `alarm`.
-This is an adaptation of the camera defence of the paper (which fits a curve to the hood outline), not the same method.
-
-`./run_hood_defense.sh` runs the whole hood defence experiment: it looks for a camera position where the hood is visible (and measures where it sits
-without attack), then runs each yaw with the defence off and on, and plots the result with `analyze_hood_defense.py`. `--probe-only` stops after the
-first step so the images can be inspected.
-
-The hood checks log two detectors in every run: the **centroid** rule (own adaptation: where the hood sits in the image) and the **paper** rule
-(`hood_edge_fit`: quadratic fit of the hood edge, alarm when the linear coefficient b is more than 0.1346 below the benign value, as in
-`PSA/Defense/Camera/engineHood_Detection.py`; the paper only flags a shift of the hood to the right, so negative yaws are needed to test it).
-
-`--psa-mode` chooses how the attack is simulated. The default, `shift`, moves the whole picture, hood included, by `f*tan(yaw)` pixels, which is
-what a film in front of the lens does. `rotate` turns the camera inside the car instead (a misaligned camera); with the camera inside the cabin
-other parts of the car body then enter the picture, so it is not suitable for the hood defence. The first sweep of the project was made with `rotate`.

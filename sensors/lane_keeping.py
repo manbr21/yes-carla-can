@@ -2,11 +2,12 @@
 
 The node reads a semantic-segmentation camera mounted like the RGB camera, estimates where the centre of
 the ego lane is in the image and, in "drive" mode, publishes THROTTLE and STEER frames on the CAN bus
-(the same frames the keyboard sender produces).
+(the same frames the keyboard sender produces). This is the victim: a camera-based control loop closed
+over CAN, used to measure what a sensor attack actually does to a vehicle instead of only to the sensor
+reading.
 
-The camera can be mounted with a yaw offset (``psa_yaw``). This models a Perspective-Shift Attack: a film
-that bends the light by a fixed angle. The controller still assumes a fixed mount, so a shifted view makes
-it steer towards the wrong place.
+The attack and the defence it can optionally run live in their own modules, see attacks/perspective_shift_attack.py
+and defense/hood_reference_defense.py (``--psa-yaw``/``--psa-mode`` and ``--defense``/``--camera-x`` respectively).
 
 Modes
     "log"    only measures and logs (drive with the keyboard sender or the autopilot)
@@ -19,24 +20,17 @@ import weakref
 import numpy as np
 import carla
 
+from attacks.perspective_shift_attack import shift_px_for_yaw, shift_tags
+from defense.hood_reference_defense import (
+    ALARM_FRAMES, HOOD_ROWS, HOOD_TOL_PX, PAPER_B_BASELINE, PAPER_B_THRESHOLD,
+    hood_edge_fit, hood_mask, hood_shift,
+)
+
 ROAD_LINE_TAG = 24   # semantic label of road markings in CARLA 0.9.15 (CityScapes palette)
 
 
 LANE_K = 2.2        # lane width in pixels per image row below the horizon (measured on Town04 highway frames)
 REF_DY = 35.0       # image row (pixels below the horizon) where the returned error is expressed
-HOOD_TAGS = (14,)    # semantic label of the ego car body (CARLA 0.9.15: 14 = Car)
-HOOD_ROWS = (0.80, 1.0)   # the hood shows up in the bottom of the image
-MIN_HOOD_PIXELS = 150
-HOOD_TOL_PX = 8.0    # hood moved more than this from the image centre: the camera is not where it was mounted
-ALARM_FRAMES = 5     # ... for this many frames in a row (0.25 s)
-# Camera defence of the paper (PSA/Defense/Camera/engineHood_Detection.py): take the top edge of the car body in the segmentation,
-# keep the points between 70% and 95% of the image height, fit y = a*x^2 + b*x + c and flag the image when b < -0.15.
-# On their benign example b = -0.0154, so the threshold is 0.1346 below the benign value: it is applied relative to
-# the benign b measured on our own camera (--hood-b-ref); with the default reference it is the paper's absolute -0.15.
-PAPER_B_THRESHOLD = -0.15
-PAPER_B_BASELINE = -0.0154
-HOOD_EDGE_ROWS = (0.70, 0.95)
-MIN_EDGE_POINTS = 30
 MIN_COHERENCE = 0.25   # below this the frame is ignored (the last estimate is kept); under a PSA the grid is distorted and coherence drops to ~0.3-0.5
 
 
@@ -70,62 +64,6 @@ def lane_center_error(tags, lane_k=LANE_K, shift_px=0.0):
     return float(centre * lane_k * REF_DY / cx), coherence
 
 
-def hood_mask(tags):
-    """Boolean mask of the ego car body (tag 14), shared by hood_shift and hood_edge_fit so a frame pays for it once."""
-    return np.isin(tags, HOOD_TAGS)
-
-
-def hood_shift(tags, mask=None):
-    """How far (pixels, + = to the right) the ego car body is from the image centre; None if it is not visible.
-
-    The hood is part of the car, so a camera mounted in the middle of the car always sees it centred. If a film
-    (or anything else) shifts the view, the hood moves in the image by about the same amount as the whole scene.
-    That makes the hood a free reference: it tells how much the image was shifted.
-    """
-    height, width = tags.shape
-    mask = hood_mask(tags) if mask is None else mask
-    _, xs = np.nonzero(mask[int(HOOD_ROWS[0] * height):int(HOOD_ROWS[1] * height)])
-    if xs.size < MIN_HOOD_PIXELS:
-        return None, int(xs.size)
-    return float(xs.mean() + 0.5 - width / 2.0), int(xs.size)
-
-
-def hood_edge_fit(tags, mask=None):
-    """The paper's hood feature: quadratic fit y = a*x^2 + b*x + c of the top edge of the car body.
-
-    For every column, the edge is the top of the contiguous run of car pixels that reaches the bottom of the
-    column (so a stray car pixel higher up, with a gap below it, is not picked up). Returns (a, b, c, number
-    of points), or None when too few columns have the hood edge inside the expected band of the image.
-    """
-    mask = hood_mask(tags) if mask is None else mask
-    height, width = mask.shape
-    row = np.arange(height)[:, None]
-    have = mask.any(axis=0)
-    last = height - 1 - np.argmax(mask[::-1], axis=0)                       # bottommost car row per column
-    # Nearest non-car row at or before each row, carried forward; -1 where every row above is car.
-    last_gap = np.maximum.accumulate(np.where(mask, -1, row), axis=0)
-    last_gap_before = np.vstack([np.full((1, width), -1), last_gap[:-1]])
-    top = last_gap_before[last, np.arange(width)] + 1                       # top of the run ending at `last`
-    sel = have & (top > HOOD_EDGE_ROWS[0] * height) & (top <= HOOD_EDGE_ROWS[1] * height)
-    if sel.sum() < MIN_EDGE_POINTS:
-        return None
-    xs, ys = np.flatnonzero(sel), top[sel]
-    a, b, c = np.polyfit(xs, ys, 2)
-    return float(a), float(b), float(c), int(xs.size)
-
-
-def shift_tags(tags, dx):
-    """Move the whole image dx pixels to the right (dx < 0: to the left). The columns that come in are left empty (label 0)."""
-    if dx == 0:
-        return tags
-    out = np.zeros_like(tags)
-    if dx > 0:
-        out[:, dx:] = tags[:, :-dx]
-    else:
-        out[:, :dx] = tags[:, -dx:]
-    return out
-
-
 def steering_law(error, d_error, kp, kd, max_steer):
     """PD controller. CARLA steer: positive turns right, range [-1, 1]."""
     return float(np.clip(kp * error + kd * d_error, -max_steer, max_steer))
@@ -148,7 +86,7 @@ class LaneKeepingNode(object):
         # "rotate": the sensor is turned by psa_yaw inside the car (what the camera sees of the car itself changes).
         # "shift": the whole picture, hood included, is moved sideways by f*tan(psa_yaw) pixels, as a film in front of the lens
         # would do (the paper's example shows the hood moved together with the scene).
-        self._psa_shift_px = 0 if psa_mode == "rotate" else int(round(-self.FOCAL_PX * np.tan(np.radians(psa_yaw))))
+        self._psa_shift_px = 0 if psa_mode == "rotate" else shift_px_for_yaw(psa_yaw, self.FOCAL_PX)
         self._target_speed = target_speed_kmh / 3.6
         self._run_seconds = run_seconds
         self._kp, self._kd, self._max_steer = kp, kd, max_steer
