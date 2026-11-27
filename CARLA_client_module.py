@@ -256,8 +256,6 @@ def main():
     argparser.add_argument("--defense", choices=["off", "detect", "stop", "compensate"], default="off",
                            help="Hood defence: detect = alarm only, stop = alarm and brake, compensate = undo the shift.")
     argparser.add_argument("--lk-dump", default=None, metavar="DIR", help="Save a segmentation image every 2 s into DIR (debug).")
-    argparser.add_argument("--lk-bias", type=float, default=0.0, metavar="E",
-                           help="Perceived-error offset measured once WITHOUT attack (camera calibration), subtracted by the controller.")
     argparser.add_argument("--target-speed", type=float, default=30.0, metavar="KMH", help="Lane keeping target speed (default: 30).")
     argparser.add_argument("--run-seconds", type=float, default=0.0, metavar="S",
                            help="Stop the lane keeping run after S seconds of driving (0 = never).")

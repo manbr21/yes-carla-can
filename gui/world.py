@@ -38,7 +38,7 @@ class World(object):
         self._psa_yaw = args.psa_yaw
         self._lane_keeping = args.lane_keeping
         self._lane_keeping_opts = dict(target_speed_kmh=args.target_speed, run_seconds=args.run_seconds, log_path=args.log_csv,
-                                     kp=args.lk_gains[0], kd=args.lk_gains[1], bias=args.lk_bias, dump_dir=args.lk_dump,
+                                     kp=args.lk_gains[0], kd=args.lk_gains[1], dump_dir=args.lk_dump,
                                      camera_x=args.camera_x, defense=args.defense, hood_ref=args.hood_ref, hood_b_ref=args.hood_b_ref, psa_mode=args.psa_mode)
         self._spawn_index = args.spawn_index
         self.restart()

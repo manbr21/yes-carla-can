@@ -18,7 +18,6 @@ NO_PROMPT="${NO_PROMPT:-}"   # set (e.g. NO_PROMPT=1) to skip the "start the rec
 VEHICLE="${VEHICLE:-}"       # blueprint id, e.g. vehicle.tesla.model3 (default: random; model3 when lane keeping is on)
 RUN_SECONDS="${RUN_SECONDS:-0}"
 LOG_CSV="${LOG_CSV:-}"
-LK_BIAS="${LK_BIAS:-}"     # e.g. LK_BIAS=0.12 (error measured on the benign run)
 LK_DUMP="${LK_DUMP:-}"     # e.g. LK_DUMP=seg_benign (saves segmentation images for debugging)
 LK_GAINS="${LK_GAINS:-}"   # e.g. LK_GAINS="0.4 0.05" (lane keeping KP KD)
 AVTP_DIR="${SCRIPT_DIR}/avtp_network"
@@ -164,7 +163,6 @@ if [[ -z "${VEHICLE}" && "${LANE_KEEPING}" != "off" ]]; then VEHICLE="vehicle.te
 CLIENT_ARGS+=(--defense "${DEFENSE}" --hood-ref "${HOOD_REF}" --hood-b-ref "${HOOD_B_REF}" --psa-mode "${PSA_MODE}")
 [[ -n "${LOG_CSV}" ]] && CLIENT_ARGS+=(--log-csv "${LOG_CSV}")
 [[ -n "${LK_DUMP}" ]] && CLIENT_ARGS+=(--lk-dump "${LK_DUMP}")
-[[ -n "${LK_BIAS}" ]] && CLIENT_ARGS+=(--lk-bias "${LK_BIAS}")
 [[ -n "${LK_GAINS}" ]] && CLIENT_ARGS+=(--lk-gains ${LK_GAINS})
 
 # Executar os módulos Python no Host com sudo -E (Acesso a vcan0 + veth-s Socket RAW + localhost)

@@ -14,7 +14,6 @@ Modes
 """
 import csv
 import os
-import time
 import weakref
 
 import numpy as np
@@ -41,7 +40,7 @@ MIN_EDGE_POINTS = 30
 MIN_COHERENCE = 0.25   # below this the frame is ignored (the last estimate is kept); under a PSA the grid is distorted and coherence drops to ~0.3-0.5
 
 
-def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE_TAG, shift_px=0.0):
+def lane_center_error(tags, lane_k=LANE_K, shift_px=0.0):
     """Estimate where the centre of the nearest lane is, relative to the image centre.
 
     The road has several lanes and the markings are dashed, so in a given frame only a few lines are
@@ -58,20 +57,25 @@ def lane_center_error(tags, lane_k=LANE_K, rows=(0.65, 0.80), line_tag=ROAD_LINE
     """
     height, width = tags.shape
     cx, horizon = width / 2.0, height / 2.0
-    y0, y1 = int(rows[0] * height), int(rows[1] * height)
-    ys, xs = np.nonzero(tags[y0:y1] == line_tag)
+    y0, y1 = int(0.65 * height), int(0.80 * height)
+    ys, xs = np.nonzero(tags[y0:y1] == ROAD_LINE_TAG)
     if ys.size < 5:
         return None, 0.0
     dy = ys + y0 - horizon
     angle = 2.0 * np.pi * (xs + 0.5 - cx - shift_px) / (lane_k * dy)
-    c, s = np.cos(angle).mean(), np.sin(angle).mean()
-    coherence = float(np.hypot(c, s))
-    line_phase = np.arctan2(s, c) / (2.0 * np.pi)            # where the lines are, in lane widths
-    centre = (line_phase + 1.0) % 1.0 - 0.5                  # the lane centre is half a lane away from a line
+    z = np.exp(1j * angle).mean()               # one pass instead of separate cos/sin means
+    coherence = float(abs(z))
+    line_phase = np.angle(z) / (2.0 * np.pi)    # where the lines are, in lane widths
+    centre = (line_phase + 1.0) % 1.0 - 0.5     # the lane centre is half a lane away from a line
     return float(centre * lane_k * REF_DY / cx), coherence
 
 
-def hood_shift(tags, hood_tags=HOOD_TAGS, rows=HOOD_ROWS, min_pixels=MIN_HOOD_PIXELS):
+def hood_mask(tags):
+    """Boolean mask of the ego car body (tag 14), shared by hood_shift and hood_edge_fit so a frame pays for it once."""
+    return np.isin(tags, HOOD_TAGS)
+
+
+def hood_shift(tags, mask=None):
     """How far (pixels, + = to the right) the ego car body is from the image centre; None if it is not visible.
 
     The hood is part of the car, so a camera mounted in the middle of the car always sees it centred. If a film
@@ -79,36 +83,35 @@ def hood_shift(tags, hood_tags=HOOD_TAGS, rows=HOOD_ROWS, min_pixels=MIN_HOOD_PI
     That makes the hood a free reference: it tells how much the image was shifted.
     """
     height, width = tags.shape
-    sub = tags[int(rows[0] * height):int(rows[1] * height)]
-    _, xs = np.nonzero(np.isin(sub, hood_tags))
-    if xs.size < min_pixels:
+    mask = hood_mask(tags) if mask is None else mask
+    _, xs = np.nonzero(mask[int(HOOD_ROWS[0] * height):int(HOOD_ROWS[1] * height)])
+    if xs.size < MIN_HOOD_PIXELS:
         return None, int(xs.size)
     return float(xs.mean() + 0.5 - width / 2.0), int(xs.size)
 
 
-def hood_edge_fit(tags, car_tags=HOOD_TAGS, rows=HOOD_EDGE_ROWS, min_points=MIN_EDGE_POINTS):
+def hood_edge_fit(tags, mask=None):
     """The paper's hood feature: quadratic fit y = a*x^2 + b*x + c of the top edge of the car body.
 
-    For every column, starting at the bottom, find the first car pixel and walk up to the first pixel that is not car: that is the
-    edge. Returns (a, b, c, number of points) or None when the hood edge is not visible.
+    For every column, the edge is the top of the contiguous run of car pixels that reaches the bottom of the
+    column (so a stray car pixel higher up, with a gap below it, is not picked up). Returns (a, b, c, number
+    of points), or None when too few columns have the hood edge inside the expected band of the image.
     """
-    mask = np.isin(tags, car_tags)
+    mask = hood_mask(tags) if mask is None else mask
     height, width = mask.shape
-    xs, ys = [], []
-    for x in range(width):
-        idx = np.flatnonzero(mask[:, x])
-        if not idx.size:
-            continue
-        last = idx[-1]
-        run = mask[:last + 1, x][::-1]
-        top = last - (run.size if run.all() else int(np.argmin(run))) + 1
-        if rows[0] * height < top <= rows[1] * height:
-            xs.append(x)
-            ys.append(top)
-    if len(xs) < min_points:
+    row = np.arange(height)[:, None]
+    have = mask.any(axis=0)
+    last = height - 1 - np.argmax(mask[::-1], axis=0)                       # bottommost car row per column
+    # Nearest non-car row at or before each row, carried forward; -1 where every row above is car.
+    last_gap = np.maximum.accumulate(np.where(mask, -1, row), axis=0)
+    last_gap_before = np.vstack([np.full((1, width), -1), last_gap[:-1]])
+    top = last_gap_before[last, np.arange(width)] + 1                       # top of the run ending at `last`
+    sel = have & (top > HOOD_EDGE_ROWS[0] * height) & (top <= HOOD_EDGE_ROWS[1] * height)
+    if sel.sum() < MIN_EDGE_POINTS:
         return None
+    xs, ys = np.flatnonzero(sel), top[sel]
     a, b, c = np.polyfit(xs, ys, 2)
-    return float(a), float(b), float(c), len(xs)
+    return float(a), float(b), float(c), int(xs.size)
 
 
 def shift_tags(tags, dx):
@@ -136,7 +139,7 @@ class LaneKeepingNode(object):
     WARMUP_S = 3.0   # let the car settle on the road before steering
 
     def __init__(self, parent_actor, can_net, mode="drive", psa_yaw=0.0, target_speed_kmh=30.0,
-                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, bias=0.0, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE, psa_mode="shift"):
+                 run_seconds=0.0, log_path=None, kp=0.5, kd=0.05, max_steer=0.5, dump_dir=None, camera_x=None, defense="off", hood_ref=0.0, hood_b_ref=PAPER_B_BASELINE, psa_mode="shift"):
         self.sensor = None
         self._parent = parent_actor
         self._can = can_net
@@ -160,7 +163,6 @@ class LaneKeepingNode(object):
         self._hood_ema = None
         self._alarm_count = 0
         self._alarm_t = None
-        self._bias = bias                # calibration: error measured on the benign run at the start
 
         world = parent_actor.get_world()
         self._map = world.get_map()
@@ -243,7 +245,8 @@ class LaneKeepingNode(object):
             print(f"[LK] first frame: best-fit k = {best_k:.2f} (coherence {best_coh:.2f}); k in use {self._lane_k:.2f}")
             print(f"[LK] first frame: {n_lines} road-marking pixels (tag {ROAD_LINE_TAG})"
                   + ("" if n_lines else " -> none found: check ROAD_LINE_TAG or the road/spawn point"))
-        hood, n_hood = hood_shift(tags)
+        car_mask = hood_mask(tags)        # shared by the two hood detectors below: computed once per frame
+        hood, n_hood = hood_shift(tags, mask=car_mask)
         if not self._reported_hood:
             self._reported_hood = True
             band = tags[int(HOOD_ROWS[0] * tags.shape[0]):]
@@ -256,7 +259,7 @@ class LaneKeepingNode(object):
             self._hood_ema = hood if self._hood_ema is None else 0.8 * self._hood_ema + 0.2 * hood
             self._alarm_count = self._alarm_count + 1 if abs(self._hood_ema) > HOOD_TOL_PX else 0
         alarm = self._alarm_count >= ALARM_FRAMES
-        fit = hood_edge_fit(tags)
+        fit = hood_edge_fit(tags, mask=car_mask)
         if fit is not None:
             if not self._reported_edge:
                 self._reported_edge = True
@@ -281,8 +284,6 @@ class LaneKeepingNode(object):
         error, coherence = lane_center_error(tags, self._lane_k, shift_px=shift)
         if error is None or coherence < MIN_COHERENCE:   # nothing reliable in this frame: keep the last estimate
             error = self._last_error
-        else:
-            error -= self._bias
         if self._last_t is None:               # first frame: no derivative yet (avoids a kick at the start)
             self._last_error = error
         dt = (t - self._last_t) if self._last_t is not None else 0.05

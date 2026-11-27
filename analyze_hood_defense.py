@@ -10,17 +10,9 @@ import sys
 
 import numpy as np
 
-LANE_WIDTH = 3.5
+from psa_common import LANE_WIDTH, SETTLE, SURFACE, INK, MUTED, load, style_axes
+
 FOCAL_PX = 240.0              # 480 px wide image, 90 degrees of field of view
-SETTLE = (8.0, 13.0)
-
-
-def load(path):
-    d = np.genfromtxt(path, delimiter=",", names=True)
-    lat = d["lateral_m"].copy()
-    for i in np.where(np.abs(np.diff(lat)) > 0.6 * LANE_WIDTH)[0]:
-        lat[i + 1:] -= np.round((lat[i + 1] - lat[i]) / LANE_WIDTH) * LANE_WIDTH
-    return d, lat
 
 
 def collect(folder):
@@ -93,8 +85,8 @@ def main():
     except ImportError:
         print("\n(matplotlib not installed: no plot)")
         return
-    ink, muted, grid = "#0b0b0b", "#52514e", "#e3e2de"
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.5, 5.2), facecolor="#fcfcfb")
+    ink, muted = INK, MUTED
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.5, 5.2), facecolor=SURFACE)
     ys = [r[0] for r in rows]
     half = LANE_WIDTH / 2
     base = next((r[1] for r in rows if r[0] == 0), 0.0)
@@ -128,17 +120,10 @@ def main():
     a2.set_ylabel("Deslocamento medido do capô (px)", color=ink)
     a2.set_title("O capô mede o deslocamento da imagem", loc="left", color=ink, fontweight="bold")
     a2.legend(frameon=False, fontsize=9, loc="upper left")
-    for ax in (a1, a2):
-        ax.set_facecolor("#fcfcfb")
-        ax.grid(axis="y", color=grid, linewidth=0.8)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
-        for side in ("left", "bottom"):
-            ax.spines[side].set_color(grid)
-        ax.tick_params(colors=muted)
+    style_axes(a1, a2)
     fig.tight_layout()
     path = os.path.join(folder, "hood_defense.png")
-    fig.savefig(path, dpi=180, facecolor="#fcfcfb")
+    fig.savefig(path, dpi=180, facecolor=SURFACE)
     print("\nfigura:", path)
 
 
